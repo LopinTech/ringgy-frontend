@@ -1,10 +1,15 @@
 'use client';
 
 /**
- * Eight-step signup onboarding. Everything the wizard collects is sent in a
+ * Nine-step signup onboarding. Everything the wizard collects is sent in a
  * single `POST /auth/register` at the end — there is no account until the
  * last step, so a visitor who abandons halfway leaves no half-built tenant
  * behind. The live preview on the right is illustrative, not real data.
+ *
+ * Signup no longer buys a phone number. The plan picked here is paid for on
+ * Stripe Checkout straight after the account is created, and Checkout sends
+ * the owner back to the dashboard's phone tab to get a number or connect
+ * SIP. A server without billing skips Checkout and lands on the dashboard.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -12,14 +17,29 @@ import Link from 'next/link';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Loader2, Pause, Play, Search, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Loader2,
+  Pause,
+  Play,
+  Search,
+  X,
+} from 'lucide-react';
 import { api } from '@/lib/api';
+import {
+  formatCents,
+  formatPerMinute,
+  isBillingUnavailable,
+  redirectTo,
+} from '@/lib/billing';
 import { toE164 } from '@/lib/mappers';
 import { formatTime } from '@/lib/business-hours';
 import type {
   ApiDayKey,
   ApiGeoResult,
   ApiHours,
+  ApiPlanCatalogue,
   ApiServiceArea,
   ApiVoice,
   ApiVoiceCatalogue,
@@ -89,6 +109,12 @@ const STEPS = [
     key: 'Voice',
     title: 'How should your receptionist sound?',
     sub: 'Pick the language and voice your customers will hear when they call.',
+  },
+  {
+    id: 'plan',
+    key: 'Plan',
+    title: 'Choose your plan',
+    sub: 'Every plan answers calls 24/7 and never cuts a caller off. Change or cancel any time.',
   },
   { id: 'ready', key: 'Ready', title: 'Your AI receptionist is ready', sub: '' },
 ] as const;
@@ -260,6 +286,10 @@ export const OnboardingWizard: React.FC = () => {
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
 
+  const [planCatalogue, setPlanCatalogue] = useState<ApiPlanCatalogue | null>(null);
+  const [planLoadFailed, setPlanLoadFailed] = useState(false);
+  const [pickedPlanId, setPickedPlanId] = useState<string | null>(null);
+
   const meta = STEPS[step];
   const stepId = meta.id;
   const bizLabel = business.trim() || 'your business';
@@ -295,6 +325,34 @@ export const OnboardingWizard: React.FC = () => {
       active = false;
     };
   }, []);
+
+  // Plans are public and small, so they are fetched up front like the
+  // voices. A failure only means signup skips Checkout, never that it stops.
+  useEffect(() => {
+    let active = true;
+
+    api
+      .plans()
+      .then((found) => {
+        if (active) setPlanCatalogue(found);
+      })
+      .catch(() => {
+        if (active) setPlanLoadFailed(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const plans = planCatalogue?.plans ?? [];
+  const billingEnabled = Boolean(planCatalogue?.billingEnabled) && plans.length > 0;
+  // The highlighted plan is the default until the visitor picks another.
+  const chosenPlan =
+    plans.find((plan) => plan.id === pickedPlanId) ??
+    plans.find((plan) => plan.highlight) ??
+    plans[0] ??
+    null;
 
   // Stop any sample that is still playing when the wizard goes away.
   useEffect(
@@ -490,8 +548,13 @@ export const OnboardingWizard: React.FC = () => {
       }
       return null;
     }
+    if (stepId === 'plan' && !planCatalogue && !planLoadFailed) {
+      return 'Plans are still loading — one moment';
+    }
     return null;
   }, [
+    planCatalogue,
+    planLoadFailed,
     stepId,
     email,
     password,
@@ -527,7 +590,6 @@ export const OnboardingWizard: React.FC = () => {
         businessPhoneE164: toE164(phone),
       });
       await refresh();
-      router.push('/');
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -535,6 +597,30 @@ export const OnboardingWizard: React.FC = () => {
           : 'Something went wrong',
       );
       setIsSubmitting(false);
+      return;
+    }
+
+    // The account exists from here on, so nothing below may send the visitor
+    // back into the wizard: every failure lands on the dashboard, where the
+    // plan can be chosen again from Billing.
+    if (!billingEnabled || !chosenPlan) {
+      router.push('/?billing=unavailable');
+      return;
+    }
+
+    try {
+      const { url } = await api.startCheckout(
+        chosenPlan.id,
+        '/?billing=success&setup=number',
+        '/?tab=billing&billing=cancelled',
+      );
+      redirectTo(url);
+    } catch (checkoutError) {
+      router.push(
+        isBillingUnavailable(checkoutError)
+          ? '/?billing=unavailable'
+          : '/?tab=billing',
+      );
     }
   };
 
@@ -589,6 +675,14 @@ export const OnboardingWizard: React.FC = () => {
             } more`
           : namedServices.join(', ') || 'None added yet',
     },
+    ...(billingEnabled && chosenPlan
+      ? [
+          {
+            label: 'Plan',
+            value: `${chosenPlan.name} · ${formatCents(chosenPlan.priceCents)}/mo`,
+          },
+        ]
+      : []),
     {
       label: 'Hours',
       value: openRows.length
@@ -1224,6 +1318,94 @@ export const OnboardingWizard: React.FC = () => {
               </div>
             )}
 
+            {stepId === 'plan' && (
+              <div className="flex flex-col gap-3">
+                {!planCatalogue && !planLoadFailed && (
+                  <div className="flex items-center gap-2 text-[13px] text-[#6B7488]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading plans…
+                  </div>
+                )}
+
+                {(planLoadFailed || (planCatalogue && !billingEnabled)) && (
+                  <div className={`${CARD} bg-[#F8FAFF] px-[18px] py-4 text-[13.5px] leading-[1.5] text-[#26304A]`}>
+                    Billing isn&apos;t set up on this server yet, so there is
+                    nothing to pay today. You can choose a plan later from your
+                    dashboard.
+                  </div>
+                )}
+
+                {billingEnabled &&
+                  plans.map((plan) => {
+                    const on = chosenPlan?.id === plan.id;
+                    return (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        onClick={() => setPickedPlanId(plan.id)}
+                        className={`relative rounded-[14px] border px-[18px] py-4 text-left transition ${
+                          on
+                            ? 'border-[#2F6BFF] bg-[#F4F7FF] ring-4 ring-[#2F6BFF]/10'
+                            : 'border-[#E4E8F0] bg-[#FCFCFD] hover:border-[#B9C3D8]'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[16px] font-extrabold text-[#0E1526]">
+                                {plan.name}
+                              </span>
+                              {plan.highlight && (
+                                <span className="rounded-full bg-[#2F6BFF] px-2.5 py-0.5 text-[11px] font-bold text-white">
+                                  Most popular
+                                </span>
+                              )}
+                            </div>
+                            {plan.description && (
+                              <div className="mt-0.5 text-[13px] text-[#6B7488]">
+                                {plan.description}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-none text-right">
+                            <div className="text-[20px] font-extrabold text-[#0E1526]">
+                              {formatCents(plan.priceCents)}
+                            </div>
+                            <div className="text-[12px] text-[#6B7488]">per month</div>
+                          </div>
+                        </div>
+                        <div className="mt-2.5 text-[13px] font-semibold text-[#26304A]">
+                          {plan.includedMinutes.toLocaleString()} minutes included
+                          {plan.overageEnabled &&
+                            ` · extra minutes ${formatPerMinute(plan.overageCentsPerMin)}`}
+                        </div>
+                        {plan.features.length > 0 && (
+                          <ul className="m-0 mt-2.5 grid list-none gap-1.5 p-0 sm:grid-cols-2">
+                            {plan.features.map((feature) => (
+                              <li
+                                key={feature}
+                                className="flex items-start gap-1.5 text-[12.5px] text-[#5C6579]"
+                              >
+                                <Check className="mt-0.5 h-3.5 w-3.5 flex-none text-[#2F6BFF]" />
+                                {feature}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                {billingEnabled && (
+                  <p className="m-0 text-[13px] leading-[1.5] text-[#5C6579]">
+                    You&apos;ll pay securely with Stripe after creating your
+                    account. Then you pick your receptionist&apos;s phone
+                    number — or connect your existing phone system.
+                  </p>
+                )}
+              </div>
+            )}
+
             {stepId === 'ready' && (
               <div className={`${CARD} mb-2 overflow-hidden`}>
                 {summary.map((row, index) => (
@@ -1273,7 +1455,11 @@ export const OnboardingWizard: React.FC = () => {
               className="flex h-[52px] flex-1 items-center justify-center gap-2 rounded-xl bg-[#0E1526] text-[15px] font-bold text-white transition hover:bg-[#2F6BFF] disabled:opacity-70"
             >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {stepId === 'ready' ? 'Create account & set up my AI' : 'Continue'}
+              {stepId === 'ready'
+                ? billingEnabled
+                  ? 'Create account & continue to payment'
+                  : 'Create account & set up my AI'
+                : 'Continue'}
             </button>
           </div>
           <div className="mt-[18px] text-center text-[13.5px] text-[#6B7488]">

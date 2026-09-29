@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import type { Appointment, Call, TenantStatus } from '@/types/schema';
@@ -8,7 +8,13 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { useDashboard } from '@/lib/useDashboard';
 
 import { DashboardShell } from '@/components/dashboard/DashboardShell';
-import { StatusBanner } from '@/components/dashboard/StatusBanner';
+import {
+  BillingBanner,
+  StatusBanner,
+} from '@/components/dashboard/StatusBanner';
+import { Notice } from '@/components/dashboard/ui';
+import { PAGES } from '@/components/dashboard/DashboardShell';
+import { errorMessage } from '@/lib/billing';
 import { OverviewView } from '@/components/dashboard/OverviewView';
 import { CallsView } from '@/components/dashboard/CallsView';
 import { AppointmentsView } from '@/components/dashboard/AppointmentsView';
@@ -19,6 +25,64 @@ import { AccountView } from '@/components/dashboard/AccountView';
 import { AppointmentModal } from '@/components/appointments/AppointmentModal';
 import { TestCallModal } from '@/components/assistant/TestCallModal';
 import { AdminDashboard } from '@/components/admin/AdminDashboard';
+
+/**
+ * What the dashboard was opened with. Stripe sends the browser back here
+ * with `?billing=success&session_id=…` (a plan) or `?addon=success&…` (a
+ * one-time add-on); signup adds `setup=number` so the owner lands on the
+ * phone tab to pick a number next. `?tab=` opens any page directly.
+ *
+ * Read from `window.location` rather than `useSearchParams`: the page only
+ * renders past the session spinner in the browser, and this avoids a
+ * Suspense boundary around the whole dashboard just to read a query once.
+ */
+interface EntryParams {
+  tab: string | null;
+  billing: string | null;
+  addon: string | null;
+  sessionId: string | null;
+  setupNumber: boolean;
+}
+
+function readEntryParams(): EntryParams | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  return {
+    tab: params.get('tab'),
+    billing: params.get('billing'),
+    addon: params.get('addon'),
+    sessionId: params.get('session_id'),
+    setupNumber: params.get('setup') === 'number',
+  };
+}
+
+function initialTab(entry: EntryParams | null): string {
+  if (!entry) return 'overview';
+  if (entry.setupNumber) return 'phone';
+  if (entry.tab && PAGES.some((page) => page.id === entry.tab)) return entry.tab;
+  if (entry.billing || entry.addon) return 'billing';
+  return 'overview';
+}
+
+interface PageNotice {
+  tone: 'green' | 'amber' | 'blue';
+  title: string;
+  body?: string;
+}
+
+function initialNotice(entry: EntryParams | null): PageNotice | null {
+  if (entry?.billing === 'cancelled' || entry?.addon === 'cancelled') {
+    return { tone: 'blue', title: 'Checkout cancelled', body: 'Nothing was charged.' };
+  }
+  if (entry?.billing === 'unavailable') {
+    return {
+      tone: 'blue',
+      title: "Billing isn't set up on this server yet",
+      body: 'Your account is ready. You can choose a plan from Billing and usage once billing is available.',
+    };
+  }
+  return null;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -38,6 +102,22 @@ export default function DashboardPage() {
     cancelAppointment,
     resolveCall,
     verifyForwarding,
+    billing,
+    plans,
+    invoices,
+    addOns,
+    phoneNumbers,
+    sip,
+    confirmCheckout,
+    changePlan,
+    cancelSubscription,
+    resumeSubscription,
+    purchaseAddOn,
+    cancelAddOn,
+    buyNumber,
+    releaseNumber,
+    connectSip,
+    disconnectSip,
   } = useDashboard(Boolean(session));
 
   // Unauthenticated visitors belong on the sign-in screen.
@@ -47,7 +127,60 @@ export default function DashboardPage() {
     }
   }, [isSessionLoading, session, router]);
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [entry] = useState(readEntryParams);
+  const [activeTab, setActiveTab] = useState(() => initialTab(entry));
+  const [notice, setNotice] = useState<PageNotice | null>(() =>
+    initialNotice(entry),
+  );
+  const [showSetupPrompt, setShowSetupPrompt] = useState(
+    () => entry?.setupNumber ?? false,
+  );
+  const handledEntryRef = useRef(false);
+
+  // Back from Stripe: confirm the session so the plan or minute pack shows
+  // straight away instead of waiting on the webhook, then drop the query so
+  // a refresh does not confirm it again. Once only — StrictMode runs effects
+  // twice in development.
+  useEffect(() => {
+    if (!session || handledEntryRef.current || !entry) return;
+    handledEntryRef.current = true;
+
+    if (window.location.search) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    const succeeded = entry.billing === 'success' || entry.addon === 'success';
+    if (!succeeded || !entry.sessionId) return;
+
+    const isAddOn = entry.addon === 'success';
+    confirmCheckout(entry.sessionId)
+      .then((result) => {
+        setNotice(
+          result.status === 'complete'
+            ? {
+                tone: 'green',
+                title: isAddOn ? 'Add-on purchased' : 'Your plan is active',
+                body: isAddOn
+                  ? 'Thanks! It is on your account now.'
+                  : entry.setupNumber
+                    ? 'Thanks! One last step: get a phone number or connect your phone system below.'
+                    : 'Thanks! Your receipt is on its way by email.',
+              }
+            : {
+                tone: 'amber',
+                title: 'Payment still processing',
+                body: 'It can take a minute to appear here. Refresh shortly.',
+              },
+        );
+      })
+      .catch((caught: unknown) => {
+        setNotice({
+          tone: 'amber',
+          title: 'We could not confirm your payment yet',
+          body: `${errorMessage(caught)} It can take a minute to appear — refresh shortly.`,
+        });
+      });
+  }, [session, entry, confirmCheckout]);
   const [isAdminView, setIsAdminView] = useState(false);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
@@ -129,6 +262,16 @@ export default function DashboardPage() {
       }}
       error={error}
     >
+      {notice && (
+        <Notice
+          tone={notice.tone}
+          title={notice.title}
+          onDismiss={() => setNotice(null)}
+        >
+          {notice.body}
+        </Notice>
+      )}
+
       {activeTab === 'admin' ? (
         <AdminDashboard
           onSelectTenantToInspect={() => {
@@ -146,6 +289,7 @@ export default function DashboardPage() {
                 onStatusChange={(next) => void setPaused(next === 'paused')}
                 onNavigateToTab={setActiveTab}
               />
+              <BillingBanner billing={billing} onNavigateToTab={setActiveTab} />
               <OverviewView
                 overview={overview}
                 calls={calls}
@@ -196,11 +340,33 @@ export default function DashboardPage() {
           {activeTab === 'phone' && (
             <PhoneView
               tenant={tenant}
+              billing={billing}
+              phoneNumbers={phoneNumbers}
+              sip={sip}
+              showSetupPrompt={showSetupPrompt}
+              onDismissSetupPrompt={() => setShowSetupPrompt(false)}
               onVerifyForwarding={() => void verifyForwarding()}
+              onBuyNumber={buyNumber}
+              onReleaseNumber={releaseNumber}
+              onConnectSip={connectSip}
+              onDisconnectSip={disconnectSip}
+              onSelectTab={setActiveTab}
             />
           )}
 
-          {activeTab === 'billing' && <BillingView overview={overview} />}
+          {activeTab === 'billing' && (
+            <BillingView
+              billing={billing}
+              plans={plans}
+              invoices={invoices}
+              addOns={addOns}
+              onChangePlan={changePlan}
+              onCancel={cancelSubscription}
+              onResume={resumeSubscription}
+              onPurchaseAddOn={purchaseAddOn}
+              onCancelAddOn={cancelAddOn}
+            />
+          )}
 
           {activeTab === 'account' && (
             <AccountView

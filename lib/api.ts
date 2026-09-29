@@ -1,5 +1,14 @@
 import type {
+  ApiAddOnPurchaseResult,
+  ApiAddOns,
   ApiAppointment,
+  ApiAvailableNumber,
+  ApiBilling,
+  ApiInvoice,
+  ApiNumberSearch,
+  ApiPhoneNumber,
+  ApiPlanCatalogue,
+  ApiSip,
   ApiCall,
   ApiGeoResult,
   ApiHours,
@@ -48,7 +57,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  // Nest sends a handler's `null` as an empty 200 body (GET /me/sip with no
+  // connection), which `response.json()` would reject.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 async function readError(response: Response): Promise<string> {
@@ -193,4 +205,97 @@ export const api = {
 
   retryProvisioning: () =>
     request<ApiProfile>('/me/retry-provisioning', { method: 'POST' }),
+
+  /* -------------------------------------------------------------- *
+   * Billing. Anything that needs Stripe answers 503 until the server
+   * has a Stripe key; callers treat that as "billing not set up".
+   * -------------------------------------------------------------- */
+
+  /** The public plan list; also used by the signup wizard. */
+  plans: () => request<ApiPlanCatalogue>('/billing/plans'),
+
+  billing: () => request<ApiBilling>('/me/billing'),
+
+  /** Starts Stripe Checkout for a first plan; redirect to the returned url. */
+  startCheckout: (planId: string, successPath?: string, cancelPath?: string) =>
+    request<{ url: string }>('/me/billing/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ planId, successPath, cancelPath }),
+    }),
+
+  /** Called on the way back from Checkout so the result shows at once. */
+  confirmCheckout: (sessionId: string) =>
+    request<{ status: string; paymentStatus: string }>(
+      '/me/billing/checkout/confirm',
+      { method: 'POST', body: JSON.stringify({ sessionId }) },
+    ),
+
+  changePlan: (planId: string) =>
+    request<ApiBilling>('/me/billing/change-plan', {
+      method: 'POST',
+      body: JSON.stringify({ planId }),
+    }),
+
+  cancelSubscription: () =>
+    request<ApiBilling>('/me/billing/cancel', { method: 'POST' }),
+
+  resumeSubscription: () =>
+    request<ApiBilling>('/me/billing/resume', { method: 'POST' }),
+
+  /** Stripe's customer portal: card, billing address, receipts. */
+  billingPortal: (returnPath?: string) =>
+    request<{ url: string }>('/me/billing/portal', {
+      method: 'POST',
+      body: JSON.stringify({ returnPath }),
+    }),
+
+  invoices: () => request<ApiInvoice[]>('/me/billing/invoices'),
+
+  addOns: () => request<ApiAddOns>('/me/billing/add-ons'),
+
+  purchaseAddOn: (id: string, quantity?: number) =>
+    request<ApiAddOnPurchaseResult>(`/me/billing/add-ons/${id}/purchase`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity }),
+    }),
+
+  cancelAddOn: (purchaseId: string) =>
+    request<void>(`/me/billing/add-ons/purchases/${purchaseId}`, {
+      method: 'DELETE',
+    }),
+
+  /* -------------------------------------------------------------- *
+   * Phone numbers and SIP
+   * -------------------------------------------------------------- */
+
+  phoneNumbers: () => request<ApiPhoneNumber[]>('/me/phone-numbers'),
+
+  searchNumbers: (search: ApiNumberSearch) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(search)) {
+      if (value !== undefined && value !== '') params.set(key, String(value));
+    }
+    return request<ApiAvailableNumber[]>(
+      `/me/phone-numbers/search?${params.toString()}`,
+    );
+  },
+
+  buyNumber: (phoneNumber: string) =>
+    request<Omit<ApiPhoneNumber, 'isPrimary'>>('/me/phone-numbers', {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber }),
+    }),
+
+  releaseNumber: (id: string) =>
+    request<void>(`/me/phone-numbers/${id}`, { method: 'DELETE' }),
+
+  sip: () => request<ApiSip | null>('/me/sip'),
+
+  connectSip: (customerNumberE164?: string) =>
+    request<ApiSip>('/me/sip', {
+      method: 'POST',
+      body: JSON.stringify({ customerNumberE164 }),
+    }),
+
+  disconnectSip: () => request<void>('/me/sip', { method: 'DELETE' }),
 };

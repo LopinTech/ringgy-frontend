@@ -60,9 +60,10 @@ export const SecondaryButton: React.FC<
 /** The pill used for call outcomes, invoice status and similar one-word states. */
 export const Tag: React.FC<{
   children: React.ReactNode;
-  tone: 'green' | 'blue' | 'grey' | 'amber';
+  tone: 'green' | 'blue' | 'grey' | 'amber' | 'red';
 }> = ({ children, tone }) => {
   const tones = {
+    red: 'bg-[#FDF3F2] text-[#B4322C]',
     green: 'bg-[#E9F8F1] text-[#0E8A5F]',
     blue: 'bg-[#EEF3FF] text-[#1E4FD8]',
     grey: 'bg-[#F3F4F7] text-[#5C6579]',
@@ -103,18 +104,111 @@ export const Toggle: React.FC<{
 );
 
 /**
- * Marks a panel whose numbers are placeholders rather than live data. The
- * dashboard has carried this label since the first version; it is the only
- * honest way to ship a billing screen before billing exists.
+ * A one-line callout above or inside a card: a warning, a success after a
+ * Stripe round trip, or an explanation of why something is unavailable.
  */
-export const SampleDataNote: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => (
-  <div className="flex items-start gap-2 rounded-[12px] border border-amber-300/60 bg-amber-50 px-3.5 py-2.5 text-[12.5px] text-amber-900">
-    <span className="font-bold">Sample data</span>
-    <span className="opacity-80">— {children}</span>
-  </div>
-);
+export const Notice: React.FC<{
+  tone: 'amber' | 'green' | 'blue' | 'red';
+  title?: string;
+  children?: React.ReactNode;
+  action?: React.ReactNode;
+  onDismiss?: () => void;
+  className?: string;
+}> = ({ tone, title, children, action, onDismiss, className = '' }) => {
+  const tones = {
+    amber: 'border-amber-300 bg-[#FFF8EC] text-[#6B4A06]',
+    green: 'border-[#BFE8D6] bg-[#EFFAF5] text-[#0B6B4A]',
+    blue: 'border-[#C9D8FF] bg-[#F4F7FF] text-[#1E3F9E]',
+    red: 'border-[#F3C5C1] bg-[#FDF3F2] text-[#8E2A24]',
+  };
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-3 rounded-[14px] border px-4 py-3 text-[13px] leading-[1.5] ${tones[tone]} ${className}`}
+    >
+      <div className="min-w-0 flex-1">
+        {title && <div className="font-bold">{title}</div>}
+        {children && <div className={title ? 'mt-0.5 opacity-90' : ''}>{children}</div>}
+      </div>
+      {action}
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="text-[12.5px] font-bold opacity-70 hover:opacity-100"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Asks before anything that changes what the customer pays or gives up a
+ * phone number. Owns its own busy and error state so each caller only
+ * supplies the action.
+ */
+export const ConfirmDialog: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => Promise<void>;
+  onClose: () => void;
+}> = ({ title, children, confirmLabel, danger, onConfirm, onClose }) => {
+  const [isBusy, setIsBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const confirm = async () => {
+    setIsBusy(true);
+    setError(null);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Something went wrong');
+      setIsBusy(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0E1526]/50 p-4 backdrop-blur-sm"
+      onClick={() => !isBusy && onClose()}
+    >
+      <div
+        className={`${CARD} animate-floatIn w-full max-w-md p-6 shadow-2xl`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="text-[16px] font-extrabold">{title}</div>
+        <div className="mt-2 text-[13.5px] leading-[1.55] text-[#5C6579]">{children}</div>
+        {error && (
+          <div className="mt-3 rounded-[10px] border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
+            {error}
+          </div>
+        )}
+        <div className="mt-5 flex justify-end gap-2.5">
+          <SecondaryButton type="button" onClick={onClose} disabled={isBusy}>
+            Not now
+          </SecondaryButton>
+          <button
+            type="button"
+            onClick={() => void confirm()}
+            disabled={isBusy}
+            className={`inline-flex h-10 items-center justify-center gap-2 rounded-[10px] px-4 text-[13.5px] font-bold text-white transition disabled:opacity-60 ${
+              danger ? 'bg-[#B4322C] hover:bg-[#962821]' : 'bg-[#0E1526] hover:bg-[#2F6BFF]'
+            }`}
+          >
+            {isBusy ? 'Working…' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 /** Initials for an avatar chip: "Dan Vance" -> "DV". */
 export function initialsOf(name: string): string {

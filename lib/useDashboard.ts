@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
-import type { ApiOverview } from './api-types';
+import type {
+  ApiAddOns,
+  ApiBilling,
+  ApiInvoice,
+  ApiOverview,
+  ApiPhoneNumber,
+  ApiPlanCatalogue,
+  ApiSip,
+} from './api-types';
 import {
   appointmentToApi,
   tenantConfigToApi,
@@ -17,6 +25,14 @@ interface DashboardState {
   calls: Call[];
   appointments: Appointment[];
   overview: ApiOverview | null;
+  /** Null when `/me/billing` could not be read; the views degrade to "not set up". */
+  billing: ApiBilling | null;
+  /** The public plan list, for the plan picker. */
+  plans: ApiPlanCatalogue | null;
+  invoices: ApiInvoice[];
+  addOns: ApiAddOns | null;
+  phoneNumbers: ApiPhoneNumber[];
+  sip: ApiSip | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -26,6 +42,12 @@ const EMPTY: DashboardState = {
   calls: [],
   appointments: [],
   overview: null,
+  billing: null,
+  plans: null,
+  invoices: [],
+  addOns: null,
+  phoneNumbers: [],
+  sip: null,
   isLoading: true,
   error: null,
 };
@@ -44,11 +66,31 @@ export function useDashboard(enabled: boolean) {
 
   const load = useCallback(async () => {
     try {
-      const [profile, calls, appointments, overview] = await Promise.all([
+      // Billing, numbers and SIP are fetched alongside but never fail the
+      // load: a Stripe outage (or a server without a Stripe key) must not
+      // take the calls and appointments down with it.
+      const [
+        profile,
+        calls,
+        appointments,
+        overview,
+        billing,
+        plans,
+        invoices,
+        addOns,
+        phoneNumbers,
+        sip,
+      ] = await Promise.all([
         api.profile(),
         api.calls(),
         api.appointments(),
         api.overview(),
+        api.billing().catch(() => null),
+        api.plans().catch(() => null),
+        api.invoices().catch(() => []),
+        api.addOns().catch(() => null),
+        api.phoneNumbers().catch(() => []),
+        api.sip().catch(() => null),
       ]);
 
       setState({
@@ -56,6 +98,12 @@ export function useDashboard(enabled: boolean) {
         calls: calls.map(toCall),
         appointments: appointments.map(toAppointment),
         overview,
+        billing,
+        plans,
+        invoices,
+        addOns,
+        phoneNumbers,
+        sip,
         isLoading: false,
         error: null,
       });
@@ -150,9 +198,102 @@ export function useDashboard(enabled: boolean) {
     await load();
   }, [load]);
 
+  /* -------------------------------------------------------------- *
+   * Billing. The Stripe-hosted steps (checkout, one-time add-ons, the
+   * portal) leave the page, so those only return the url to go to.
+   * -------------------------------------------------------------- */
+
+  const confirmCheckout = useCallback(
+    async (sessionId: string) => {
+      try {
+        return await api.confirmCheckout(sessionId);
+      } finally {
+        // Even if the confirm call fails the webhook may already have landed.
+        await load();
+      }
+    },
+    [load],
+  );
+
+  const changePlan = useCallback(
+    async (planId: string) => {
+      await api.changePlan(planId);
+      await load();
+    },
+    [load],
+  );
+
+  const cancelSubscription = useCallback(async () => {
+    await api.cancelSubscription();
+    await load();
+  }, [load]);
+
+  const resumeSubscription = useCallback(async () => {
+    await api.resumeSubscription();
+    await load();
+  }, [load]);
+
+  /** Returns the Checkout url for a one-time add-on, or null once a recurring one is added. */
+  const purchaseAddOn = useCallback(
+    async (id: string): Promise<string | null> => {
+      const result = await api.purchaseAddOn(id);
+      if ('url' in result) return result.url;
+      await load();
+      return null;
+    },
+    [load],
+  );
+
+  const cancelAddOn = useCallback(
+    async (purchaseId: string) => {
+      await api.cancelAddOn(purchaseId);
+      await load();
+    },
+    [load],
+  );
+
+  const buyNumber = useCallback(
+    async (phoneNumber: string) => {
+      await api.buyNumber(phoneNumber);
+      await load();
+    },
+    [load],
+  );
+
+  const releaseNumber = useCallback(
+    async (id: string) => {
+      await api.releaseNumber(id);
+      await load();
+    },
+    [load],
+  );
+
+  const connectSip = useCallback(
+    async (customerNumberE164?: string) => {
+      await api.connectSip(customerNumberE164);
+      await load();
+    },
+    [load],
+  );
+
+  const disconnectSip = useCallback(async () => {
+    await api.disconnectSip();
+    await load();
+  }, [load]);
+
   return {
     ...state,
     reload: load,
+    confirmCheckout,
+    changePlan,
+    cancelSubscription,
+    resumeSubscription,
+    purchaseAddOn,
+    cancelAddOn,
+    buyNumber,
+    releaseNumber,
+    connectSip,
+    disconnectSip,
     saveTenant,
     resyncAssistant,
     setPaused,

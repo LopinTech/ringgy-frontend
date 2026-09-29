@@ -71,7 +71,7 @@ export const PAGES: PageMeta[] = [
     id: 'phone',
     label: 'Phone number',
     title: 'Phone number',
-    sub: 'Your number, forwarding, and routing rules.',
+    sub: 'Your numbers, SIP connection, and call forwarding.',
     icon: PhoneForwarded,
   },
   {

@@ -156,7 +156,6 @@ export interface ApiCall {
   endedAt: string | null;
   durationSeconds: number | null;
   finalCallStatus: string | null;
-  costCents: number | null;
   outcome: ApiCallOutcome | null;
   resolvedAt: string | null;
   /** Telnyx's record of what was said, newest sync wins. */
@@ -172,5 +171,181 @@ export interface ApiOverview {
   bookedAppointments: number;
   needsReviewCount: number;
   minutesUsedThisMonth: number;
-  telnyxCostCentsThisMonth: number;
+}
+
+/* ------------------------------------------------------------------ *
+ * Billing, add-ons, phone numbers and SIP
+ *
+ * Money is integer cents unless a field says `CentsPerMin`, which is a
+ * decimal number of cents (12 = $0.12/min). Nothing here carries what a
+ * call costs Ringgy — customers only ever see their own prices.
+ * ------------------------------------------------------------------ */
+
+export interface ApiPlan {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  priceCents: number;
+  includedMinutes: number;
+  includedPhoneNumbers: number;
+  overageCentsPerMin: number;
+  overageEnabled: boolean;
+  usageWarningPercent: number;
+  features: string[];
+  highlight: boolean;
+}
+
+/** GET /billing/plans — public, so the signup wizard can show it. */
+export interface ApiPlanCatalogue {
+  plans: ApiPlan[];
+  pricePerMinuteCents: number | null;
+  phoneNumberMonthlyCents: number | null;
+  billingEnabled: boolean;
+}
+
+export type ApiSubscriptionStatus =
+  | 'INCOMPLETE'
+  | 'INCOMPLETE_EXPIRED'
+  | 'TRIALING'
+  | 'ACTIVE'
+  | 'PAST_DUE'
+  | 'CANCELED'
+  | 'UNPAID'
+  | 'PAUSED';
+
+export interface ApiSubscription {
+  status: ApiSubscriptionStatus;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  plan: ApiPlan;
+}
+
+export type ApiUsageState = 'ok' | 'approaching' | 'exceeded';
+
+export interface ApiUsage {
+  periodStart: string;
+  periodEnd: string;
+  usedMinutes: number;
+  includedMinutes: number;
+  includedUsedMinutes: number;
+  includedRemainingMinutes: number;
+  packMinutesRemaining: number;
+  packMinutesUsed: number;
+  overageMinutes: number;
+  overageEnabled: boolean;
+  overageCentsPerMin: number;
+  estimatedOverageCents: number;
+  /** 0–100, and past 100 once overage has started. */
+  percentOfIncluded: number;
+  warningPercent: number;
+  state: ApiUsageState;
+}
+
+export interface ApiBilling {
+  billingEnabled: boolean;
+  subscription: ApiSubscription | null;
+  usage: ApiUsage | null;
+  phoneNumbers: {
+    count: number;
+    included: number;
+    monthlyPriceCents: number | null;
+    monthlyTotalCents: number;
+  };
+  pricePerMinuteCents: number | null;
+}
+
+export interface ApiInvoice {
+  id: string;
+  number: string | null;
+  createdAt: string;
+  totalCents: number;
+  amountPaidCents: number;
+  amountDueCents: number;
+  currency: string;
+  status: string | null;
+  hostedUrl: string | null;
+  pdfUrl: string | null;
+}
+
+export type ApiAddOnKind = 'MINUTE_PACK' | 'PHONE_NUMBER' | 'SERVICE';
+export type ApiAddOnBillingType = 'ONE_TIME' | 'RECURRING';
+
+export interface ApiAddOn {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  kind: ApiAddOnKind;
+  billingType: ApiAddOnBillingType;
+  priceCents: number;
+  minutes: number | null;
+}
+
+export interface ApiAddOnPurchase {
+  id: string;
+  status: 'ACTIVE' | 'CANCELED';
+  quantity: number;
+  unitPriceCents: number;
+  minutesGranted: number | null;
+  minutesRemaining: number | null;
+  createdAt: string;
+  canceledAt: string | null;
+  addOn: ApiAddOn;
+}
+
+export interface ApiAddOns {
+  available: ApiAddOn[];
+  purchases: ApiAddOnPurchase[];
+}
+
+/** ONE_TIME add-ons go through Stripe Checkout; RECURRING ones are added straight away. */
+export type ApiAddOnPurchaseResult = { url: string } | { purchaseId: string };
+
+export type ApiPhoneNumberStatus = 'PENDING' | 'ACTIVE' | 'FAILED' | 'RELEASED';
+
+export interface ApiPhoneNumber {
+  id: string;
+  phoneNumber: string;
+  status: ApiPhoneNumberStatus;
+  statusDetail: string | null;
+  source: 'PURCHASED' | 'ADOPTED';
+  locality: string | null;
+  region: string | null;
+  monthlyPriceCents: number | null;
+  billing: 'INCLUDED' | 'BILLED' | 'UNBILLED' | 'NOT_BILLED';
+  purchasedAt: string | null;
+  isPrimary: boolean;
+}
+
+export interface ApiAvailableNumber {
+  phoneNumber: string;
+  locality: string | null;
+  region: string | null;
+  /** Telnyx hid the digits because the account is not verified yet. */
+  masked: boolean;
+  monthlyPriceCents: number | null;
+}
+
+export interface ApiNumberSearch {
+  country?: string;
+  areaCode?: string;
+  locality?: string;
+  region?: string;
+  contains?: string;
+  type?: 'local' | 'toll_free';
+  limit?: number;
+}
+
+export interface ApiSip {
+  status: 'PENDING' | 'ACTIVE' | 'FAILED' | 'DISABLED';
+  statusDetail: string | null;
+  customerNumberE164: string | null;
+  host: string;
+  sipUri: string;
+  transports: string[];
+  codecs: string[];
+  notes: string[];
+  lastSyncedAt: string | null;
 }

@@ -9,7 +9,9 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2, Pause, Play } from 'lucide-react';
 import type { TenantConfig, TenantStatus } from '@/types/schema';
-import { PrimaryButton, SecondaryButton } from './ui';
+import type { ApiBilling } from '@/lib/api-types';
+import { formatPerMinute, hasLivePlan } from '@/lib/billing';
+import { Notice, PrimaryButton, SecondaryButton } from './ui';
 
 interface StatusBannerProps {
   tenant: TenantConfig;
@@ -82,5 +84,59 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
         Pause
       </SecondaryButton>
     </div>
+  );
+};
+
+/**
+ * The billing nudge under the status banner: no plan yet, or minutes
+ * running low. Nothing here mentions what calls cost Ringgy — only the
+ * customer's own allowance and rate.
+ */
+export const BillingBanner: React.FC<{
+  billing: ApiBilling | null;
+  onNavigateToTab: (tab: string) => void;
+}> = ({ billing, onNavigateToTab }) => {
+  if (!billing) return null;
+
+  // Choosing a plan needs Stripe, so a server without billing never asks.
+  if (!hasLivePlan(billing)) {
+    if (!billing.billingEnabled) return null;
+    return (
+      <Notice
+        tone="blue"
+        title="Choose a plan to go live"
+        action={
+          <PrimaryButton type="button" onClick={() => onNavigateToTab('billing')}>
+            Choose a plan
+          </PrimaryButton>
+        }
+      >
+        Your receptionist is set up. Pick a plan, then get a phone number or
+        connect your own phone system.
+      </Notice>
+    );
+  }
+
+  const usage = billing.usage;
+  if (!usage || usage.state === 'ok') return null;
+
+  const link = (
+    <SecondaryButton type="button" onClick={() => onNavigateToTab('billing')}>
+      View usage
+    </SecondaryButton>
+  );
+
+  return usage.state === 'approaching' ? (
+    <Notice tone="amber" title="You're approaching your monthly limit." action={link}>
+      {Math.round(usage.includedUsedMinutes).toLocaleString()} of{' '}
+      {usage.includedMinutes.toLocaleString()} included minutes used.
+    </Notice>
+  ) : (
+    <Notice tone="amber" title="You've used all your included minutes" action={link}>
+      {usage.overageEnabled
+        ? `Extra minutes are now billed at ${formatPerMinute(usage.overageCentsPerMin)}. `
+        : ''}
+      Calls keep being answered.
+    </Notice>
   );
 };
