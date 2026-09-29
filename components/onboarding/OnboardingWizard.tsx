@@ -29,13 +29,17 @@ import {
 import { api } from '@/lib/api';
 import {
   formatCents,
+  formatE164,
   formatPerMinute,
   isBillingUnavailable,
   redirectTo,
 } from '@/lib/billing';
 import { toE164 } from '@/lib/mappers';
+import { guessFromNumber } from '@/lib/phone-countries';
+import { NumberSearch } from '@/components/phone/NumberSearch';
 import { formatTime } from '@/lib/business-hours';
 import type {
+  ApiAvailableNumber,
   ApiDayKey,
   ApiGeoResult,
   ApiHours,
@@ -83,8 +87,8 @@ const STEPS = [
   {
     id: 'phone',
     key: 'Phone number',
-    title: 'Which number do your customers call?',
-    sub: "We'll use this number to connect your customers with your AI receptionist.",
+    title: 'How should calls reach your receptionist?',
+    sub: 'Pick a new number, forward the one you have, or connect your phone system. You can change this later.',
   },
   {
     id: 'areas',
@@ -179,9 +183,30 @@ const MAX_RADIUS_MILES = 100;
 const SEARCH_DEBOUNCE_MS = 350;
 const MIN_QUERY_LENGTH = 3;
 
-const NUMBER_STEPS = [
-  'You keep this number. Nothing about it changes today.',
-  'We give you a forwarding setting so unanswered calls ring your AI receptionist instead of voicemail.',
+type PhoneMethod = 'PURCHASE' | 'FORWARD' | 'SIP';
+
+/** The three ways in, as the phone step offers them. */
+const PHONE_METHODS: { id: PhoneMethod; title: string; body: string }[] = [
+  {
+    id: 'PURCHASE',
+    title: 'Get a new number',
+    body: 'Pick a local or toll-free Ringgy number and give it to your customers.',
+  },
+  {
+    id: 'FORWARD',
+    title: 'Forward my existing number',
+    body: 'Keep your number. Unanswered calls forward to a Ringgy number we set up for you.',
+  },
+  {
+    id: 'SIP',
+    title: 'Connect my phone system (SIP)',
+    body: 'Already on a PBX or VoIP system? Route calls to your receptionist over SIP. No new number.',
+  },
+];
+
+const FORWARD_STEPS = [
+  'You keep your number. Nothing about it changes today.',
+  'After signup you dial a short code from your carrier, so unanswered calls ring your AI receptionist instead of voicemail.',
   'Turn forwarding on or off any time — your team can always pick up first.',
 ];
 
@@ -263,6 +288,17 @@ export const OnboardingWizard: React.FC = () => {
   const [trade, setTrade] = useState<string>(TRADE_CHIPS[0]);
   const [tradeOther, setTradeOther] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneMethod, setPhoneMethod] = useState<PhoneMethod | null>(null);
+  // The Ringgy number picked on the phone step. Nothing is bought yet — it
+  // is bought once the plan is paid for.
+  const [pickedNumber, setPickedNumber] = useState<{
+    phoneNumber: string;
+    country: string;
+  } | null>(null);
+  // Only a full US/Canada number yields an area code to search around.
+  const forwardAreaCode = guessFromNumber(toE164(phone)).areaCode ?? (
+    phone.replace(/\D/g, '').length >= 10 ? 'intl' : null
+  );
   const [services, setServices] = useState<ServiceRow[]>([
     { name: '', price: '', duration: '' },
   ]);
@@ -347,6 +383,17 @@ export const OnboardingWizard: React.FC = () => {
 
   const plans = planCatalogue?.plans ?? [];
   const billingEnabled = Boolean(planCatalogue?.billingEnabled) && plans.length > 0;
+
+  // Every current plan includes a number, so the one picked here costs
+  // nothing extra; otherwise the number's own monthly price is shown.
+  const numberIncluded =
+    plans.length > 0 && plans.every((plan) => plan.includedPhoneNumbers >= 1);
+  const numberPriceLabel = (result: ApiAvailableNumber) =>
+    numberIncluded
+      ? 'Included with every plan'
+      : result.monthlyPriceCents !== null
+        ? `${formatCents(result.monthlyPriceCents)}/mo`
+        : null;
   // The highlighted plan is the default until the visitor picks another.
   const chosenPlan =
     plans.find((plan) => plan.id === pickedPlanId) ??
@@ -530,8 +577,20 @@ export const OnboardingWizard: React.FC = () => {
       return null;
     }
     if (stepId === 'phone') {
-      if (phone.replace(/\D/g, '').length < 10) {
+      if (!phoneMethod) {
+        return 'Choose how calls should reach your receptionist';
+      }
+      const digits = phone.replace(/\D/g, '').length;
+      if (phoneMethod === 'FORWARD' && digits < 10) {
         return 'Enter the number your customers call today';
+      }
+      if (phoneMethod === 'SIP' && digits > 0 && digits < 10) {
+        return 'Check your existing number, or leave it empty';
+      }
+      if (phoneMethod !== 'SIP' && !pickedNumber) {
+        return phoneMethod === 'FORWARD'
+          ? 'Pick the Ringgy number your calls will forward to'
+          : 'Pick your new Ringgy number';
       }
       return null;
     }
@@ -562,6 +621,8 @@ export const OnboardingWizard: React.FC = () => {
     trade,
     tradeOther,
     phone,
+    phoneMethod,
+    pickedNumber,
     namedServices.length,
     hours,
   ]);
@@ -587,7 +648,15 @@ export const OnboardingWizard: React.FC = () => {
         serviceAreas: areas.length ? areas : undefined,
         voice: selectedVoice?.id,
         language: selectedVoice ? language : undefined,
-        businessPhoneE164: toE164(phone),
+        businessPhoneE164:
+          phoneMethod !== 'PURCHASE' && phone.trim() ? toE164(phone) : undefined,
+        phoneSetup: phoneMethod
+          ? {
+              method: phoneMethod,
+              phoneNumber:
+                phoneMethod === 'SIP' ? undefined : pickedNumber?.phoneNumber,
+            }
+          : undefined,
       });
       await refresh();
     } catch (submitError) {
@@ -644,6 +713,17 @@ export const OnboardingWizard: React.FC = () => {
 
   const summary = [
     { label: 'Business', value: business.trim() || '—' },
+    {
+      label: 'Phone',
+      value:
+        phoneMethod === 'SIP'
+          ? `Your phone system over SIP${phone.trim() ? ` · ${phone}` : ''}`
+          : phoneMethod === 'FORWARD'
+            ? `${phone} forwards to ${pickedNumber ? formatE164(pickedNumber.phoneNumber) : 'a Ringgy number'}`
+            : pickedNumber
+              ? `New number ${formatE164(pickedNumber.phoneNumber)}`
+              : '—',
+    },
     { label: 'Trade', value: tradeLabel },
     {
       label: 'Service area',
@@ -813,40 +893,160 @@ export const OnboardingWizard: React.FC = () => {
 
             {stepId === 'phone' && (
               <div className="flex flex-col gap-[18px]">
-                <label className="flex flex-col gap-[7px]">
-                  <span className={LABEL}>Current business number</span>
-                  <input
-                    type="tel"
-                    autoComplete="tel"
-                    value={phone}
-                    onChange={(event) =>
-                      setPhone(formatPhone(event.target.value))
-                    }
-                    placeholder="(555) 234-8900"
-                    className={FIELD}
-                  />
-                </label>
-                <p className="m-0 text-[13px] leading-[1.5] text-[#5C6579]">
-                  This is the number your customers already call. After setup,
-                  you can forward calls to your AI receptionist.
-                </p>
-                <div className={`${CARD} bg-[#F8FAFF] px-[18px] pt-[18px] pb-4`}>
-                  <div className="mb-3.5 text-xs font-bold tracking-[.08em] text-[#2F6BFF] uppercase">
-                    What happens to your number
-                  </div>
-                  <div className="flex flex-col gap-[13px]">
-                    {NUMBER_STEPS.map((text, index) => (
-                      <div key={text} className="flex items-start gap-[11px]">
-                        <div className="mt-px grid h-5 w-5 flex-none place-items-center rounded-full bg-[#2F6BFF] text-[11px] font-bold text-white">
-                          {index + 1}
-                        </div>
-                        <div className="text-[13.5px] leading-[1.5] text-[#26304A]">
-                          {text}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                <div role="radiogroup" aria-label="How calls reach your receptionist" className="flex flex-col gap-2.5">
+                  {PHONE_METHODS.map((method) => {
+                    const active = phoneMethod === method.id;
+                    return (
+                      <button
+                        key={method.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        onClick={() => {
+                          setPhoneMethod(method.id);
+                          setError(null);
+                          if (method.id === 'SIP') setPickedNumber(null);
+                        }}
+                        className={`flex items-start gap-3 rounded-[14px] border px-4 py-3.5 text-left transition ${
+                          active
+                            ? 'border-[#2F6BFF] bg-[#F4F7FF] ring-4 ring-[#2F6BFF]/10'
+                            : 'border-[#E4E8F0] bg-white hover:border-[#B9C3D8]'
+                        }`}
+                      >
+                        <span
+                          className={`mt-0.5 grid h-[18px] w-[18px] flex-none place-items-center rounded-full border-2 ${
+                            active ? 'border-[#2F6BFF]' : 'border-[#C6CDDB]'
+                          }`}
+                        >
+                          {active && <span className="h-2 w-2 rounded-full bg-[#2F6BFF]" />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[14.5px] font-bold text-[#0E1526]">
+                            {method.title}
+                          </span>
+                          <span className="mt-0.5 block text-[13px] leading-[1.45] text-[#5C6579]">
+                            {method.body}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
+
+                {(phoneMethod === 'FORWARD' || phoneMethod === 'SIP') && (
+                  <label className="flex flex-col gap-[7px]">
+                    <span className={LABEL}>
+                      {phoneMethod === 'FORWARD'
+                        ? 'Your current business number'
+                        : 'Your existing number (optional)'}
+                    </span>
+                    <input
+                      type="tel"
+                      autoComplete="tel"
+                      value={phone}
+                      onChange={(event) => {
+                        setPhone(formatPhone(event.target.value));
+                        // A new area code means a new set of local numbers.
+                        if (phoneMethod === 'FORWARD') setPickedNumber(null);
+                      }}
+                      placeholder="(555) 234-8900"
+                      className={FIELD}
+                    />
+                  </label>
+                )}
+
+                {phoneMethod === 'PURCHASE' && (
+                  <NumberSearch
+                    search={api.publicSearchNumbers}
+                    selected={pickedNumber?.phoneNumber}
+                    actionLabel="Select"
+                    priceLabel={numberPriceLabel}
+                    blockedReason={(result) =>
+                      result.masked
+                        ? 'Number purchasing is pending carrier account verification'
+                        : null
+                    }
+                    onPick={(result, country) => {
+                      setPickedNumber({ phoneNumber: result.phoneNumber, country });
+                      setError(null);
+                    }}
+                    limit={6}
+                    fieldClassName={FIELD}
+                    labelClassName={LABEL}
+                  />
+                )}
+
+                {phoneMethod === 'FORWARD' && forwardAreaCode && (
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <div className={LABEL}>Your Ringgy forwarding number</div>
+                      <p className="m-0 mt-1 text-[13px] leading-[1.5] text-[#5C6579]">
+                        Unanswered calls forward here. Customers never see it —
+                        they keep calling your number.
+                      </p>
+                    </div>
+                    <NumberSearch
+                      key={forwardAreaCode}
+                      search={api.publicSearchNumbers}
+                      initial={guessFromNumber(toE164(phone))}
+                      autoSearch
+                      selected={pickedNumber?.phoneNumber}
+                      actionLabel="Select"
+                      priceLabel={numberPriceLabel}
+                      blockedReason={(result) =>
+                        result.masked
+                          ? 'Number purchasing is pending carrier account verification'
+                          : null
+                      }
+                      onPick={(result, country) => {
+                        setPickedNumber({ phoneNumber: result.phoneNumber, country });
+                        setError(null);
+                      }}
+                      limit={6}
+                      fieldClassName={FIELD}
+                      labelClassName={LABEL}
+                    />
+                  </div>
+                )}
+
+                {phoneMethod === 'FORWARD' && (
+                  <div className={`${CARD} bg-[#F8FAFF] px-[18px] pt-[18px] pb-4`}>
+                    <div className="mb-3.5 text-xs font-bold tracking-[.08em] text-[#2F6BFF] uppercase">
+                      What happens to your number
+                    </div>
+                    <div className="flex flex-col gap-[13px]">
+                      {FORWARD_STEPS.map((text, index) => (
+                        <div key={text} className="flex items-start gap-[11px]">
+                          <div className="mt-px grid h-5 w-5 flex-none place-items-center rounded-full bg-[#2F6BFF] text-[11px] font-bold text-white">
+                            {index + 1}
+                          </div>
+                          <div className="text-[13.5px] leading-[1.5] text-[#26304A]">
+                            {text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {phoneMethod === 'SIP' && (
+                  <div className={`${CARD} bg-[#F8FAFF] px-[18px] py-4 text-[13.5px] leading-[1.55] text-[#26304A]`}>
+                    Once your plan is active, we create a private SIP address
+                    for your receptionist. Your phone system (or your IT
+                    provider) routes calls to it — we show the address,
+                    transport and codecs on the Phone page, ready to copy.
+                  </div>
+                )}
+
+                {pickedNumber && phoneMethod !== 'SIP' && (
+                  <p className="m-0 text-[13px] leading-[1.5] text-[#5C6579]">
+                    <span className="font-semibold text-[#0E1526]">
+                      {formatE164(pickedNumber.phoneNumber)}
+                    </span>{' '}
+                    is yours as soon as your plan is active. If it gets taken
+                    in the meantime, you can pick another on the Phone page.
+                  </p>
+                )}
               </div>
             )}
 

@@ -9,6 +9,7 @@ import type {
   ApiOverview,
   ApiPhoneNumber,
   ApiPlanCatalogue,
+  ApiPhoneSetup,
   ApiSip,
 } from './api-types';
 import {
@@ -33,6 +34,8 @@ interface DashboardState {
   addOns: ApiAddOns | null;
   phoneNumbers: ApiPhoneNumber[];
   sip: ApiSip | null;
+  /** The phone choice made at signup and whether it has been carried out. */
+  phoneSetup: ApiPhoneSetup | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -48,6 +51,7 @@ const EMPTY: DashboardState = {
   addOns: null,
   phoneNumbers: [],
   sip: null,
+  phoneSetup: null,
   isLoading: true,
   error: null,
 };
@@ -80,6 +84,7 @@ export function useDashboard(enabled: boolean) {
         addOns,
         phoneNumbers,
         sip,
+        phoneSetup,
       ] = await Promise.all([
         api.profile(),
         api.calls(),
@@ -91,6 +96,7 @@ export function useDashboard(enabled: boolean) {
         api.addOns().catch(() => null),
         api.phoneNumbers().catch(() => []),
         api.sip().catch(() => null),
+        api.getPhoneSetup().catch(() => null),
       ]);
 
       setState({
@@ -104,6 +110,7 @@ export function useDashboard(enabled: boolean) {
         addOns,
         phoneNumbers,
         sip,
+        phoneSetup,
         isLoading: false,
         error: null,
       });
@@ -215,6 +222,18 @@ export function useDashboard(enabled: boolean) {
     [load],
   );
 
+  /**
+   * Carries out the phone choice made at signup (buy the picked number, or
+   * open SIP) now that the plan is paid. Safe to repeat.
+   */
+  const completePhoneSetup = useCallback(async () => {
+    try {
+      return await api.completePhoneSetup();
+    } finally {
+      await load();
+    }
+  }, [load]);
+
   const changePlan = useCallback(
     async (planId: string) => {
       await api.changePlan(planId);
@@ -253,8 +272,8 @@ export function useDashboard(enabled: boolean) {
   );
 
   const buyNumber = useCallback(
-    async (phoneNumber: string) => {
-      await api.buyNumber(phoneNumber);
+    async (phoneNumber: string, country?: string) => {
+      await api.buyNumber(phoneNumber, country);
       await load();
     },
     [load],
@@ -285,6 +304,7 @@ export function useDashboard(enabled: boolean) {
     ...state,
     reload: load,
     confirmCheckout,
+    completePhoneSetup,
     changePlan,
     cancelSubscription,
     resumeSubscription,

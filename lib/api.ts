@@ -6,6 +6,7 @@ import type {
   ApiBilling,
   ApiInvoice,
   ApiNumberSearch,
+  ApiPhoneSetup,
   ApiPhoneNumber,
   ApiPlanCatalogue,
   ApiSip,
@@ -95,6 +96,21 @@ export interface RegisterPayload {
   pricingNotes?: string;
   businessPhoneE164?: string;
   carrier?: string;
+  /** How calls will reach the receptionist, chosen on the phone step. */
+  phoneSetup?: {
+    method: 'PURCHASE' | 'FORWARD' | 'SIP';
+    /** The Ringgy number picked (not for SIP); bought once the plan is paid. */
+    phoneNumber?: string;
+  };
+}
+
+/** A number search as query parameters, empty filters left out. */
+function searchParams(search: ApiNumberSearch): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(search)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  return params.toString();
 }
 
 export const api = {
@@ -270,20 +286,27 @@ export const api = {
 
   phoneNumbers: () => request<ApiPhoneNumber[]>('/me/phone-numbers'),
 
-  searchNumbers: (search: ApiNumberSearch) => {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(search)) {
-      if (value !== undefined && value !== '') params.set(key, String(value));
-    }
-    return request<ApiAvailableNumber[]>(
-      `/me/phone-numbers/search?${params.toString()}`,
-    );
-  },
+  searchNumbers: (search: ApiNumberSearch) =>
+    request<ApiAvailableNumber[]>(
+      `/me/phone-numbers/search?${searchParams(search)}`,
+    ),
 
-  buyNumber: (phoneNumber: string) =>
+  /** The same search without a session, for the signup phone step. */
+  publicSearchNumbers: (search: ApiNumberSearch) =>
+    request<ApiAvailableNumber[]>(
+      `/phone-numbers/search?${searchParams(search)}`,
+    ),
+
+  getPhoneSetup: () => request<ApiPhoneSetup>('/me/phone-setup'),
+
+  /** Carries out the signup phone choice once the plan is paid; idempotent. */
+  completePhoneSetup: () =>
+    request<ApiPhoneSetup>('/me/phone-setup/complete', { method: 'POST' }),
+
+  buyNumber: (phoneNumber: string, country?: string) =>
     request<Omit<ApiPhoneNumber, 'isPrimary'>>('/me/phone-numbers', {
       method: 'POST',
-      body: JSON.stringify({ phoneNumber }),
+      body: JSON.stringify({ phoneNumber, country }),
     }),
 
   releaseNumber: (id: string) =>

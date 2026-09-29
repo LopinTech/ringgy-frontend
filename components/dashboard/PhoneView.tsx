@@ -20,18 +20,18 @@ import {
   CheckCircle2,
   Copy,
   Loader2,
-  Search,
   ShieldCheck,
 } from 'lucide-react';
 import type { TenantConfig } from '@/types/schema';
 import type {
   ApiAvailableNumber,
   ApiBilling,
-  ApiNumberSearch,
   ApiPhoneNumber,
+  ApiPhoneSetup,
   ApiSip,
 } from '@/lib/api-types';
 import { api } from '@/lib/api';
+import { NumberSearch } from '@/components/phone/NumberSearch';
 import { CARRIERS } from '@/lib/mockData';
 import { toE164 } from '@/lib/mappers';
 import {
@@ -57,11 +57,13 @@ interface PhoneViewProps {
   billing: ApiBilling | null;
   phoneNumbers: ApiPhoneNumber[];
   sip: ApiSip | null;
+  /** The phone choice made at signup and whether it was carried out. */
+  phoneSetup?: ApiPhoneSetup | null;
   /** Set on the way back from signup checkout: the next step is a number or SIP. */
   showSetupPrompt?: boolean;
   onDismissSetupPrompt?: () => void;
   onVerifyForwarding: () => void;
-  onBuyNumber: (phoneNumber: string) => Promise<void>;
+  onBuyNumber: (phoneNumber: string, country?: string) => Promise<void>;
   onReleaseNumber: (id: string) => Promise<void>;
   onConnectSip: (customerNumberE164?: string) => Promise<void>;
   onDisconnectSip: () => Promise<void>;
@@ -108,6 +110,7 @@ export const PhoneView: React.FC<PhoneViewProps> = ({
   billing,
   phoneNumbers,
   sip,
+  phoneSetup,
   showSetupPrompt,
   onDismissSetupPrompt,
   onVerifyForwarding,
@@ -118,10 +121,26 @@ export const PhoneView: React.FC<PhoneViewProps> = ({
   onSelectTab,
 }) => {
   const live = hasLivePlan(billing);
+  const connected =
+    phoneNumbers.some((number) => number.status !== 'RELEASED') ||
+    sip?.status === 'ACTIVE';
+  // The signup choice could not be carried out (typically: the picked
+  // number was taken before the plan was paid). Shown until the owner has
+  // another way in.
+  const setupFailed = phoneSetup?.status === 'FAILED' && !connected;
 
   return (
     <>
-      {showSetupPrompt && (
+      {setupFailed && (
+        <Notice tone="amber" title="We couldn't finish the phone setup you chose at signup">
+          {phoneSetup?.error ?? 'Something went wrong.'}{' '}
+          {phoneSetup?.method === 'SIP'
+            ? 'Try connecting your phone system again below.'
+            : 'Pick another number below — it is included in your plan.'}
+        </Notice>
+      )}
+
+      {showSetupPrompt && phoneSetup?.status !== 'DONE' && !setupFailed && (
         <Notice
           tone="blue"
           title="Last step: connect your calls"
@@ -178,44 +197,18 @@ const NumbersCard: React.FC<{
   billing: ApiBilling | null;
   live: boolean;
   phoneNumbers: ApiPhoneNumber[];
-  onBuyNumber: (phoneNumber: string) => Promise<void>;
+  onBuyNumber: (phoneNumber: string, country?: string) => Promise<void>;
   onReleaseNumber: (id: string) => Promise<void>;
 }> = ({ billing, live, phoneNumbers, onBuyNumber, onReleaseNumber }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [search, setSearch] = useState<ApiNumberSearch>({ type: 'local' });
-  const [results, setResults] = useState<ApiAvailableNumber[] | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [buying, setBuying] = useState<ApiAvailableNumber | null>(null);
+  const [buying, setBuying] = useState<{ result: ApiAvailableNumber; country: string } | null>(null);
   const [releasing, setReleasing] = useState<ApiPhoneNumber | null>(null);
+  // Remounts the search (clearing its results) after a purchase.
+  const [searchKey, setSearchKey] = useState(0);
 
   const numbers = phoneNumbers.filter((number) => number.status !== 'RELEASED');
   const includedCount = billing?.subscription?.plan.includedPhoneNumbers ?? 0;
   const nextIsIncluded = (billing?.phoneNumbers.count ?? numbers.length) < includedCount;
-  const anyMasked = results?.some((result) => result.masked) ?? false;
-
-  const patch = (key: keyof ApiNumberSearch, value: string) =>
-    setSearch((current) => ({ ...current, [key]: value }));
-
-  const runSearch = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setIsSearching(true);
-    setSearchError(null);
-    try {
-      setResults(
-        await api.searchNumbers({
-          ...search,
-          country: 'US',
-          region: search.region?.trim().toUpperCase() || undefined,
-          limit: 12,
-        }),
-      );
-    } catch (caught) {
-      setSearchError(errorMessage(caught, 'Could not search for numbers.'));
-      setResults(null);
-    }
-    setIsSearching(false);
-  };
 
   return (
     <Card className="p-[22px]">
@@ -287,157 +280,44 @@ const NumbersCard: React.FC<{
 
       {isSearchOpen && (
         <div className="mt-5 border-t border-[#E4E8F0] pt-5">
-          <form onSubmit={(event) => void runSearch(event)} className="flex flex-col gap-3">
-            <div className="flex gap-2">
-              {(['local', 'toll_free'] as const).map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => patch('type', type)}
-                  className={`rounded-full border px-3.5 py-2 text-[12.5px] font-bold transition ${
-                    search.type === type
-                      ? 'border-[#2F6BFF] bg-[#2F6BFF] text-white'
-                      : 'border-[#DDE1EA] bg-white text-[#26304A] hover:border-[#B9C3D8]'
-                  }`}
-                >
-                  {type === 'local' ? 'Local' : 'Toll-free'}
-                </button>
-              ))}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Area code</span>
-                <input
-                  inputMode="numeric"
-                  maxLength={3}
-                  value={search.areaCode ?? ''}
-                  onChange={(event) => patch('areaCode', event.target.value.replace(/\D/g, ''))}
-                  placeholder="512"
-                  className={FIELD}
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={LABEL}>Contains digits</span>
-                <input
-                  inputMode="numeric"
-                  value={search.contains ?? ''}
-                  onChange={(event) => patch('contains', event.target.value.replace(/\D/g, ''))}
-                  placeholder="55"
-                  className={FIELD}
-                />
-              </label>
-              {search.type === 'local' && (
-                <>
-                  <label className="flex flex-col gap-1.5">
-                    <span className={LABEL}>City</span>
-                    <input
-                      value={search.locality ?? ''}
-                      onChange={(event) => patch('locality', event.target.value)}
-                      placeholder="Austin"
-                      className={FIELD}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className={LABEL}>State</span>
-                    <input
-                      maxLength={2}
-                      value={search.region ?? ''}
-                      onChange={(event) => patch('region', event.target.value)}
-                      placeholder="TX"
-                      className={FIELD}
-                    />
-                  </label>
-                </>
-              )}
-            </div>
-            <PrimaryButton type="submit" disabled={isSearching} className="self-start">
-              {isSearching ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
-              Search numbers
-            </PrimaryButton>
-          </form>
-
-          {searchError && (
-            <Notice tone="amber" className="mt-3">
-              {searchError}
-            </Notice>
-          )}
-
-          {anyMasked && (
-            <Notice tone="blue" className="mt-3" title="Number purchasing is almost ready">
-              We can show which numbers are available, but buying them is
-              pending verification of our phone carrier account. Check back
-              soon — or connect your existing phone system over SIP meanwhile.
-            </Notice>
-          )}
-
-          {results && results.length === 0 && (
-            <p className="m-0 mt-3 text-[13px] text-[#6B7488]">
-              No numbers matched. Try a nearby area code or fewer filters.
-            </p>
-          )}
-
-          {results && results.length > 0 && (
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {results.map((result, index) => (
-                <div
-                  key={`${result.phoneNumber}-${index}`}
-                  className="flex items-center gap-3 rounded-[12px] border border-[#E4E8F0] px-3.5 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-mono text-[14px] font-bold">
-                      {formatE164(result.phoneNumber)}
-                    </div>
-                    <div className="mt-0.5 truncate text-[12px] text-[#6B7488]">
-                      {[
-                        [result.locality, result.region].filter(Boolean).join(', '),
-                        nextIsIncluded
-                          ? 'Included'
-                          : result.monthlyPriceCents !== null
-                            ? `${formatCents(result.monthlyPriceCents)}/mo`
-                            : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </div>
-                  </div>
-                  <SecondaryButton
-                    type="button"
-                    disabled={result.masked || !live}
-                    title={
-                      result.masked
-                        ? 'Number purchasing is pending carrier account verification'
-                        : undefined
-                    }
-                    onClick={() => setBuying(result)}
-                  >
-                    Buy
-                  </SecondaryButton>
-                </div>
-              ))}
-            </div>
-          )}
+          <NumberSearch
+            key={searchKey}
+            search={api.searchNumbers}
+            actionLabel="Buy"
+            priceLabel={(result) =>
+              nextIsIncluded
+                ? 'Included in your plan'
+                : result.monthlyPriceCents !== null
+                  ? `${formatCents(result.monthlyPriceCents)}/mo`
+                  : null
+            }
+            blockedReason={(result) =>
+              result.masked
+                ? 'Number purchasing is pending carrier account verification'
+                : live
+                  ? null
+                  : 'Choose a plan first'
+            }
+            onPick={(result, country) => setBuying({ result, country })}
+          />
         </div>
       )}
 
       {buying && (
         <ConfirmDialog
-          title={`Get ${formatE164(buying.phoneNumber)}?`}
+          title={`Get ${formatE164(buying.result.phoneNumber)}?`}
           confirmLabel="Get this number"
           onClose={() => setBuying(null)}
           onConfirm={async () => {
-            await onBuyNumber(buying.phoneNumber);
-            setResults(null);
+            await onBuyNumber(buying.result.phoneNumber, buying.country);
+            setSearchKey((key) => key + 1);
             setIsSearchOpen(false);
           }}
         >
           {nextIsIncluded
             ? 'This number is included in your plan — no extra charge.'
             : `This number is billed at ${formatCents(
-                buying.monthlyPriceCents ?? billing?.phoneNumbers.monthlyPriceCents ?? 0,
+                buying.result.monthlyPriceCents ?? billing?.phoneNumbers.monthlyPriceCents ?? 0,
               )}/mo on top of your plan, until you release it.`}
         </ConfirmDialog>
       )}

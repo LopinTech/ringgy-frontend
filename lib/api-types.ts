@@ -338,6 +338,14 @@ export interface ApiNumberSearch {
   limit?: number;
 }
 
+/** The phone choice made at signup, and whether it has been carried out. */
+export interface ApiPhoneSetup {
+  method: 'PURCHASE' | 'FORWARD' | 'SIP' | null;
+  status: 'PENDING' | 'DONE' | 'FAILED' | null;
+  phoneNumber: string | null;
+  error: string | null;
+}
+
 export interface ApiSip {
   status: 'PENDING' | 'ACTIVE' | 'FAILED' | 'DISABLED';
   statusDetail: string | null;

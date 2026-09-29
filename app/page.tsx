@@ -14,7 +14,8 @@ import {
 } from '@/components/dashboard/StatusBanner';
 import { Notice } from '@/components/dashboard/ui';
 import { PAGES } from '@/components/dashboard/DashboardShell';
-import { errorMessage } from '@/lib/billing';
+import { errorMessage, formatE164 } from '@/lib/billing';
+import type { ApiPhoneSetup } from '@/lib/api-types';
 import { OverviewView } from '@/components/dashboard/OverviewView';
 import { CallsView } from '@/components/dashboard/CallsView';
 import { AppointmentsView } from '@/components/dashboard/AppointmentsView';
@@ -84,6 +85,44 @@ function initialNotice(entry: EntryParams | null): PageNotice | null {
   return null;
 }
 
+/** What to tell the owner after the signup phone choice was carried out. */
+function phoneSetupNotice(setup: ApiPhoneSetup | null): PageNotice {
+  const number = setup?.phoneNumber ? formatE164(setup.phoneNumber) : 'Your number';
+  if (setup?.status === 'DONE') {
+    if (setup.method === 'SIP') {
+      return {
+        tone: 'green',
+        title: 'Your plan is active and SIP is ready',
+        body: 'Point your phone system at the SIP address below to start sending calls to your receptionist.',
+      };
+    }
+    if (setup.method === 'FORWARD') {
+      return {
+        tone: 'green',
+        title: `Your plan is active and ${number} is ready`,
+        body: 'Last step: dial your carrier’s forwarding code below so unanswered calls reach your receptionist.',
+      };
+    }
+    return {
+      tone: 'green',
+      title: `Your plan is active — ${number} is yours`,
+      body: 'Calls to it are answered by your receptionist from now on.',
+    };
+  }
+  if (setup?.status === 'FAILED') {
+    return {
+      tone: 'amber',
+      title: 'Your plan is active, but we could not finish your phone setup',
+      body: `${setup.error ?? 'Something went wrong.'} Pick another number or connect SIP below.`,
+    };
+  }
+  return {
+    tone: 'green',
+    title: 'Your plan is active',
+    body: 'One last step: get a phone number or connect your phone system below.',
+  };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { session, isLoading: isSessionLoading, logout } = useAuth();
@@ -108,7 +147,9 @@ export default function DashboardPage() {
     addOns,
     phoneNumbers,
     sip,
+    phoneSetup,
     confirmCheckout,
+    completePhoneSetup,
     changePlan,
     cancelSubscription,
     resumeSubscription,
@@ -154,24 +195,28 @@ export default function DashboardPage() {
 
     const isAddOn = entry.addon === 'success';
     confirmCheckout(entry.sessionId)
-      .then((result) => {
-        setNotice(
-          result.status === 'complete'
-            ? {
-                tone: 'green',
-                title: isAddOn ? 'Add-on purchased' : 'Your plan is active',
-                body: isAddOn
-                  ? 'Thanks! It is on your account now.'
-                  : entry.setupNumber
-                    ? 'Thanks! One last step: get a phone number or connect your phone system below.'
-                    : 'Thanks! Your receipt is on its way by email.',
-              }
-            : {
-                tone: 'amber',
-                title: 'Payment still processing',
-                body: 'It can take a minute to appear here. Refresh shortly.',
-              },
-        );
+      .then(async (result) => {
+        if (result.status !== 'complete') {
+          setNotice({
+            tone: 'amber',
+            title: 'Payment still processing',
+            body: 'It can take a minute to appear here. Refresh shortly.',
+          });
+          return;
+        }
+        if (isAddOn || !entry.setupNumber) {
+          setNotice({
+            tone: 'green',
+            title: isAddOn ? 'Add-on purchased' : 'Your plan is active',
+            body: isAddOn
+              ? 'Thanks! It is on your account now.'
+              : 'Thanks! Your receipt is on its way by email.',
+          });
+          return;
+        }
+        // Straight from signup: carry out the phone choice made there.
+        const setup = await completePhoneSetup().catch(() => null);
+        setNotice(phoneSetupNotice(setup));
       })
       .catch((caught: unknown) => {
         setNotice({
@@ -180,7 +225,7 @@ export default function DashboardPage() {
           body: `${errorMessage(caught)} It can take a minute to appear — refresh shortly.`,
         });
       });
-  }, [session, entry, confirmCheckout]);
+  }, [session, entry, confirmCheckout, completePhoneSetup]);
   const [isAdminView, setIsAdminView] = useState(false);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
@@ -343,6 +388,7 @@ export default function DashboardPage() {
               billing={billing}
               phoneNumbers={phoneNumbers}
               sip={sip}
+              phoneSetup={phoneSetup}
               showSetupPrompt={showSetupPrompt}
               onDismissSetupPrompt={() => setShowSetupPrompt(false)}
               onVerifyForwarding={() => void verifyForwarding()}
