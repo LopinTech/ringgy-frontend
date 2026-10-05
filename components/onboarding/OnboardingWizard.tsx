@@ -6,13 +6,16 @@
  * last step, so a visitor who abandons halfway leaves no half-built tenant
  * behind. The live preview on the right is illustrative, not real data.
  *
- * Signup no longer buys a phone number. The plan picked here is paid for on
- * Stripe Checkout straight after the account is created, and Checkout sends
- * the owner back to the dashboard's phone tab to get a number or connect
- * SIP. A server without billing skips Checkout and lands on the dashboard.
+ * Signup never asks for a card. When the backoffice offers a free trial
+ * (the default), the plan step explains the trial instead, the account
+ * starts on it, and the owner lands on the dashboard's phone tab where the
+ * number picked here is set up straight away. With trials switched off, the
+ * plan picked here is paid for on Stripe Checkout straight after the account
+ * is created, and Checkout sends the owner back to the phone tab. A server
+ * without billing skips Checkout and lands on the dashboard.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
@@ -123,7 +126,6 @@ const STEPS = [
   { id: 'ready', key: 'Ready', title: 'Your AI receptionist is ready', sub: '' },
 ] as const;
 
-const LAST_STEP = STEPS.length - 1;
 
 /**
  * The chip row is a shortcut, not the full taxonomy — "Other" reveals a
@@ -326,7 +328,21 @@ export const OnboardingWizard: React.FC = () => {
   const [planLoadFailed, setPlanLoadFailed] = useState(false);
   const [pickedPlanId, setPickedPlanId] = useState<string | null>(null);
 
-  const meta = STEPS[step];
+  // The free trial is the backoffice's to switch on or off. When it is on
+  // there is no plan to pick at signup, so the plan step is left out and the
+  // trial terms are shown on the last step instead.
+  const trial = planCatalogue?.trial?.enabled ? planCatalogue.trial : null;
+  // Also left out when the catalogue could not be loaded: there is then
+  // nothing to pick, and the dashboard shows whether the account is on the
+  // trial or needs a plan.
+  const steps =
+    trial || planLoadFailed
+      ? STEPS.filter((entry) => entry.id !== 'plan')
+      : STEPS;
+  const lastStep = steps.length - 1;
+  // Clamped: the catalogue can arrive after the visitor is already past
+  // the step it removes.
+  const meta = steps[Math.min(step, lastStep)];
   const stepId = meta.id;
   const bizLabel = business.trim() || 'your business';
   const tradeLabel = (trade === OTHER ? tradeOther.trim() : trade) || 'service';
@@ -389,7 +405,9 @@ export const OnboardingWizard: React.FC = () => {
   const numberIncluded =
     plans.length > 0 && plans.every((plan) => plan.includedPhoneNumbers >= 1);
   const numberPriceLabel = (result: ApiAvailableNumber) =>
-    numberIncluded
+    trial
+      ? 'Free during your trial'
+      : numberIncluded
       ? 'Included with every plan'
       : result.monthlyPriceCents !== null
         ? `${formatCents(result.monthlyPriceCents)}/mo`
@@ -561,7 +579,8 @@ export const OnboardingWizard: React.FC = () => {
     );
 
   /** What blocks the current step, or null when it is complete. */
-  const stepError = useMemo((): string | null => {
+  // Plain function: the React Compiler memoizes it.
+  const stepError = ((): string | null => {
     if (stepId === 'account') {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
         return 'Enter the email address you want to sign in with';
@@ -611,21 +630,7 @@ export const OnboardingWizard: React.FC = () => {
       return 'Plans are still loading — one moment';
     }
     return null;
-  }, [
-    planCatalogue,
-    planLoadFailed,
-    stepId,
-    email,
-    password,
-    business,
-    trade,
-    tradeOther,
-    phone,
-    phoneMethod,
-    pickedNumber,
-    namedServices.length,
-    hours,
-  ]);
+  })();
 
   const submit = async () => {
     setIsSubmitting(true);
@@ -672,6 +677,22 @@ export const OnboardingWizard: React.FC = () => {
     // The account exists from here on, so nothing below may send the visitor
     // back into the wizard: every failure lands on the dashboard, where the
     // plan can be chosen again from Billing.
+    //
+    // On the free trial there is nothing to pay: the dashboard sets up the
+    // number picked here and the trial runs from now.
+    if (trial) {
+      // A full navigation, not router.push: the dashboard reads its entry
+      // params from window.location on first render, which a client-side
+      // transition has not updated yet.
+      redirectTo('/?trial=started&setup=number');
+      return;
+    }
+    if (planLoadFailed) {
+      // The trial (if the backoffice offers one) started with the account;
+      // the dashboard reads the real state instead of guessing here.
+      redirectTo('/?setup=number');
+      return;
+    }
     if (!billingEnabled || !chosenPlan) {
       router.push('/?billing=unavailable');
       return;
@@ -699,11 +720,11 @@ export const OnboardingWizard: React.FC = () => {
       return;
     }
     setError(null);
-    if (step === LAST_STEP) {
+    if (step >= lastStep) {
       void submit();
       return;
     }
-    setStep((current) => Math.min(LAST_STEP, current + 1));
+    setStep((current) => Math.min(lastStep, current + 1));
   };
 
   const back = () => {
@@ -755,7 +776,14 @@ export const OnboardingWizard: React.FC = () => {
             } more`
           : namedServices.join(', ') || 'None added yet',
     },
-    ...(billingEnabled && chosenPlan
+    ...(trial
+      ? [
+          {
+            label: 'Plan',
+            value: `Free trial · ${trial.durationDays} days, ${trial.includedMinutes.toLocaleString()} minutes`,
+          },
+        ]
+      : billingEnabled && chosenPlan
       ? [
           {
             label: 'Plan',
@@ -787,7 +815,7 @@ export const OnboardingWizard: React.FC = () => {
         <Logo className="mb-11" />
 
         <div className="mb-3.5 flex gap-1.5">
-          {STEPS.map((entry, index) => (
+          {steps.map((entry, index) => (
             <div
               key={entry.key}
               className={`h-1 flex-1 rounded-full transition-colors ${
@@ -797,7 +825,7 @@ export const OnboardingWizard: React.FC = () => {
           ))}
         </div>
         <div className="mb-8 text-[12.5px] font-semibold text-[#8A93A6]">
-          Step {step + 1} of {STEPS.length} · {meta.key}
+          Step {Math.min(step, lastStep) + 1} of {steps.length} · {meta.key}
         </div>
 
         <div className="w-full max-w-[460px] flex-1">
@@ -807,7 +835,11 @@ export const OnboardingWizard: React.FC = () => {
             </h1>
             <p className="mb-7 text-[15px] leading-[1.55] text-pretty text-[#5C6579]">
               {stepId === 'ready'
-                ? `We've got everything we need to set up your receptionist for ${bizLabel}.`
+                ? `We've got everything we need to set up your receptionist for ${bizLabel}.${
+                    trial
+                      ? ` Your ${trial.durationDays}-day free trial starts as soon as you create your account — no credit card needed.`
+                      : ''
+                  }`
                 : meta.sub}
             </p>
 
@@ -1031,7 +1063,7 @@ export const OnboardingWizard: React.FC = () => {
 
                 {phoneMethod === 'SIP' && (
                   <div className={`${CARD} bg-[#F8FAFF] px-[18px] py-4 text-[13.5px] leading-[1.55] text-[#26304A]`}>
-                    Once your plan is active, we create a private SIP address
+                    {trial ? 'As soon as your account is created' : 'Once your plan is active'}, we create a private SIP address
                     for your receptionist. Your phone system (or your IT
                     provider) routes calls to it — we show the address,
                     transport and codecs on the Phone page, ready to copy.
@@ -1043,7 +1075,8 @@ export const OnboardingWizard: React.FC = () => {
                     <span className="font-semibold text-[#0E1526]">
                       {formatE164(pickedNumber.phoneNumber)}
                     </span>{' '}
-                    is yours as soon as your plan is active. If it gets taken
+                    is yours as soon as your{' '}
+                    {trial ? 'account is created' : 'plan is active'}. If it gets taken
                     in the meantime, you can pick another on the Phone page.
                   </p>
                 )}
@@ -1627,6 +1660,24 @@ export const OnboardingWizard: React.FC = () => {
                 ))}
               </div>
             )}
+
+            {stepId === 'ready' && trial && (
+              <div className="mt-3 flex flex-col gap-2">
+                <p className="m-0 text-[12.5px] leading-[1.55] text-[#6B7488]">
+                  If you don&apos;t upgrade, your receptionist keeps answering
+                  for {trial.graceDays} more day{trial.graceDays === 1 ? '' : 's'}{' '}
+                  after the trial, then stops. Your dashboard, call history and
+                  settings stay viewable for {trial.readOnlyDays} days after
+                  that
+                  {trial.releaseNumbers
+                    ? `, and a trial phone number is released ${trial.numberRetentionDays} day${trial.numberRetentionDays === 1 ? '' : 's'} after calls stop`
+                    : ''}
+                  .
+                  {trial.stopAtMinuteLimit &&
+                    ` Calls also stop once the ${trial.includedMinutes} free minutes are used.`}
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1656,7 +1707,9 @@ export const OnboardingWizard: React.FC = () => {
             >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
               {stepId === 'ready'
-                ? billingEnabled
+                ? trial
+                  ? 'Start my free trial'
+                  : billingEnabled
                   ? 'Create account & continue to payment'
                   : 'Create account & set up my AI'
                 : 'Continue'}

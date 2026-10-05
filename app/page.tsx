@@ -13,6 +13,10 @@ import {
   StatusBanner,
 } from '@/components/dashboard/StatusBanner';
 import { Notice } from '@/components/dashboard/ui';
+import {
+  LockedScreen,
+  ServiceAccessBanner,
+} from '@/components/dashboard/TrialBanner';
 import { PAGES } from '@/components/dashboard/DashboardShell';
 import { errorMessage, formatE164 } from '@/lib/billing';
 import type { ApiPhoneSetup } from '@/lib/api-types';
@@ -31,7 +35,8 @@ import { AdminDashboard } from '@/components/admin/AdminDashboard';
  * What the dashboard was opened with. Stripe sends the browser back here
  * with `?billing=success&session_id=…` (a plan) or `?addon=success&…` (a
  * one-time add-on); signup adds `setup=number` so the owner lands on the
- * phone tab to pick a number next. `?tab=` opens any page directly.
+ * phone tab to pick a number next, and `trial=started` when the account was
+ * created on the free trial (no checkout). `?tab=` opens any page directly.
  *
  * Read from `window.location` rather than `useSearchParams`: the page only
  * renders past the session spinner in the browser, and this avoids a
@@ -43,6 +48,7 @@ interface EntryParams {
   addon: string | null;
   sessionId: string | null;
   setupNumber: boolean;
+  trialStarted: boolean;
 }
 
 function readEntryParams(): EntryParams | null {
@@ -54,6 +60,7 @@ function readEntryParams(): EntryParams | null {
     addon: params.get('addon'),
     sessionId: params.get('session_id'),
     setupNumber: params.get('setup') === 'number',
+    trialStarted: params.get('trial') === 'started',
   };
 }
 
@@ -83,6 +90,44 @@ function initialNotice(entry: EntryParams | null): PageNotice | null {
     };
   }
   return null;
+}
+
+/** First landing after signing up on the free trial. */
+function trialStartedNotice(setup: ApiPhoneSetup | null): PageNotice {
+  const number = setup?.phoneNumber ? formatE164(setup.phoneNumber) : null;
+  if (setup?.status === 'FAILED') {
+    return {
+      tone: 'amber',
+      title: 'Your free trial has started, but we could not finish your phone setup',
+      body: `${setup.error ?? 'Something went wrong.'} Pick another number or connect SIP below.`,
+    };
+  }
+  if (setup?.status === 'DONE' && setup.method === 'FORWARD') {
+    return {
+      tone: 'green',
+      title: `Your free trial has started and ${number ?? 'your number'} is ready`,
+      body: 'Last step: dial your carrier’s forwarding code below so unanswered calls reach your receptionist. No card needed.',
+    };
+  }
+  if (setup?.status === 'DONE' && setup.method === 'SIP') {
+    return {
+      tone: 'green',
+      title: 'Your free trial has started and SIP is ready',
+      body: 'Point your phone system at the SIP address below. No card needed.',
+    };
+  }
+  if (setup?.status === 'DONE') {
+    return {
+      tone: 'green',
+      title: `Your free trial has started — ${number ?? 'your number'} is live`,
+      body: 'Calls to it are answered by your receptionist from now on. No card needed; upgrade whenever you like.',
+    };
+  }
+  return {
+    tone: 'green',
+    title: 'Your free trial has started',
+    body: 'No card needed. Get a phone number or connect your phone system below to start taking calls.',
+  };
 }
 
 /** What to tell the owner after the signup phone choice was carried out. */
@@ -159,6 +204,7 @@ export default function DashboardPage() {
     releaseNumber,
     connectSip,
     disconnectSip,
+    access,
   } = useDashboard(Boolean(session));
 
   // Unauthenticated visitors belong on the sign-in screen.
@@ -188,6 +234,15 @@ export default function DashboardPage() {
 
     if (window.location.search) {
       window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    // Signed up on the free trial: there is no checkout to confirm, so the
+    // phone choice from signup is carried out straight away.
+    if (entry.trialStarted) {
+      void completePhoneSetup()
+        .catch(() => null)
+        .then((setup) => setNotice(trialStartedNotice(setup)));
+      return;
     }
 
     const succeeded = entry.billing === 'success' || entry.addon === 'success';
@@ -242,6 +297,13 @@ export default function DashboardPage() {
       .length;
 
   const status: TenantStatus = tenant?.status ?? 'setup_incomplete';
+
+  // The free trial (or a plan) decides what the dashboard may do. Without
+  // the access read — an older server — nothing is restricted.
+  const readOnly = access?.readOnly ?? false;
+  const locked = access?.locked ?? false;
+  const answeringStopped = access ? !access.canAnswerCalls : false;
+  const onTrial = Boolean(access?.trial && access.trial.status !== 'CONVERTED');
 
   const openAppointmentFromCall = (call: Call) => {
     const captured = call.extractedAppointment;
@@ -299,7 +361,10 @@ export default function DashboardPage() {
         setIsAdminView(admin);
         setActiveTab(admin ? 'admin' : 'overview');
       }}
-      onStartTestCall={() => setIsTestCallOpen(true)}
+      onStartTestCall={
+        answeringStopped ? undefined : () => setIsTestCallOpen(true)
+      }
+      answeringStopped={answeringStopped}
       onLogout={() => {
         // The cookie is cleared server-side; the redirect is what stops the
         // dashboard refetching with a session that no longer exists.
@@ -317,6 +382,13 @@ export default function DashboardPage() {
         </Notice>
       )}
 
+      {activeTab !== 'admin' && (
+        <ServiceAccessBanner
+          access={access}
+          onUpgrade={() => setActiveTab('billing')}
+        />
+      )}
+
       {activeTab === 'admin' ? (
         <AdminDashboard
           onSelectTenantToInspect={() => {
@@ -324,17 +396,23 @@ export default function DashboardPage() {
             setActiveTab('overview');
           }}
         />
+      ) : locked && access && activeTab !== 'billing' ? (
+        <LockedScreen access={access} onUpgrade={() => setActiveTab('billing')} />
       ) : (
         <>
           {activeTab === 'overview' && (
             <>
-              <StatusBanner
-                tenant={tenant}
-                status={status}
-                onStatusChange={(next) => void setPaused(next === 'paused')}
-                onNavigateToTab={setActiveTab}
-              />
-              <BillingBanner billing={billing} onNavigateToTab={setActiveTab} />
+              {!answeringStopped && (
+                <StatusBanner
+                  tenant={tenant}
+                  status={status}
+                  onStatusChange={(next) => void setPaused(next === 'paused')}
+                  onNavigateToTab={setActiveTab}
+                />
+              )}
+              {!onTrial && !readOnly && (
+                <BillingBanner billing={billing} onNavigateToTab={setActiveTab} />
+              )}
               <OverviewView
                 overview={overview}
                 calls={calls}
@@ -353,6 +431,7 @@ export default function DashboardPage() {
             <CallsView
               calls={calls}
               selectedCall={selectedCall}
+              readOnly={readOnly}
               onSelectCall={setSelectedCall}
               onCreateAppointmentFromCall={openAppointmentFromCall}
               onMarkResolved={(callId) => {
@@ -369,23 +448,30 @@ export default function DashboardPage() {
           {activeTab === 'appointments' && (
             <AppointmentsView
               appointments={appointments}
+              readOnly={readOnly}
               onOpenModal={openAppointment}
               onCancelAppointment={(id) => void cancelAppointment(id)}
             />
           )}
 
+          {/* A disabled fieldset turns every control in these forms off at
+              once while leaving the content readable. */}
           {activeTab === 'assistant' && (
-            <CompanyProfileView
-              tenant={tenant}
-              onSaveTenant={(updated) => void saveTenant(updated)}
-              onResyncAssistant={() => void resyncAssistant()}
-            />
+            <fieldset disabled={readOnly} className="contents">
+              <CompanyProfileView
+                tenant={tenant}
+                onSaveTenant={(updated) => void saveTenant(updated)}
+                onResyncAssistant={() => void resyncAssistant()}
+              />
+            </fieldset>
           )}
 
           {activeTab === 'phone' && (
+            <fieldset disabled={readOnly} className="contents">
             <PhoneView
               tenant={tenant}
               billing={billing}
+              access={access}
               phoneNumbers={phoneNumbers}
               sip={sip}
               phoneSetup={phoneSetup}
@@ -398,11 +484,13 @@ export default function DashboardPage() {
               onDisconnectSip={disconnectSip}
               onSelectTab={setActiveTab}
             />
+            </fieldset>
           )}
 
           {activeTab === 'billing' && (
             <BillingView
               billing={billing}
+              access={access}
               plans={plans}
               invoices={invoices}
               addOns={addOns}
@@ -415,10 +503,12 @@ export default function DashboardPage() {
           )}
 
           {activeTab === 'account' && (
-            <AccountView
-              tenant={tenant}
-              onUpdateTenant={(updated) => void saveTenant(updated)}
-            />
+            <fieldset disabled={readOnly} className="contents">
+              <AccountView
+                tenant={tenant}
+                onUpdateTenant={(updated) => void saveTenant(updated)}
+              />
+            </fieldset>
           )}
         </>
       )}
@@ -428,6 +518,7 @@ export default function DashboardPage() {
         onClose={() => setIsAppointmentModalOpen(false)}
         onSave={(data) => void saveAppointment(data)}
         initialData={editingAppointment}
+        readOnly={readOnly}
       />
 
       {/* Real WebRTC conversation with this tenant's own assistant.

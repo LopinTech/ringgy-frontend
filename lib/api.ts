@@ -1,4 +1,5 @@
 import type {
+  ApiAccess,
   ApiAddOnPurchaseResult,
   ApiAddOns,
   ApiAppointment,
@@ -99,7 +100,7 @@ export interface RegisterPayload {
   /** How calls will reach the receptionist, chosen on the phone step. */
   phoneSetup?: {
     method: 'PURCHASE' | 'FORWARD' | 'SIP';
-    /** The Ringgy number picked (not for SIP); bought once the plan is paid. */
+    /** The Ringgy number picked (not for SIP); bought on the free trial, or once the plan is paid. */
     phoneNumber?: string;
   };
 }
@@ -231,6 +232,9 @@ export const api = {
   plans: () => request<ApiPlanCatalogue>('/billing/plans'),
 
   billing: () => request<ApiBilling>('/me/billing'),
+
+  /** Trial or plan, whether calls are answered, whether changes are allowed. */
+  access: () => request<ApiAccess>('/me/access'),
 
   /** Starts Stripe Checkout for a first plan; redirect to the returned url. */
   startCheckout: (planId: string, successPath?: string, cancelPath?: string) =>

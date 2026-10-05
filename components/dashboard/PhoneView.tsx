@@ -5,8 +5,9 @@
  * keep their own phone system, and call forwarding from the business number
  * to the primary Ringgy number.
  *
- * Numbers and SIP both need a live plan, so without one the page leads with
- * a prompt to choose a plan instead of letting a purchase fail.
+ * Numbers and SIP need a live plan or the free trial (which includes a
+ * number), so without either the page leads with a prompt to choose a plan
+ * instead of letting a purchase fail.
  *
  * The mock puts an on/off switch on call forwarding. Forwarding is
  * configured on the carrier's side with a dial code, so a switch here could
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 import type { TenantConfig } from '@/types/schema';
 import type {
+  ApiAccess,
   ApiAvailableNumber,
   ApiBilling,
   ApiPhoneNumber,
@@ -55,6 +57,8 @@ import {
 interface PhoneViewProps {
   tenant: TenantConfig;
   billing: ApiBilling | null;
+  /** Trial / plan state: what may be bought right now. */
+  access?: ApiAccess | null;
   phoneNumbers: ApiPhoneNumber[];
   sip: ApiSip | null;
   /** The phone choice made at signup and whether it was carried out. */
@@ -108,6 +112,7 @@ const HANDLING = [
 export const PhoneView: React.FC<PhoneViewProps> = ({
   tenant,
   billing,
+  access = null,
   phoneNumbers,
   sip,
   phoneSetup,
@@ -121,6 +126,17 @@ export const PhoneView: React.FC<PhoneViewProps> = ({
   onSelectTab,
 }) => {
   const live = hasLivePlan(billing);
+  const onTrial = access?.mode === 'trial';
+  // Without the access read (an older server), the plan alone decides.
+  const canBuy = access ? access.canBuyNumbers : live;
+  const canSip = live || onTrial;
+  const buyBlockedReason = canBuy
+    ? null
+    : onTrial
+      ? `Your free trial includes ${access?.trial?.maxPhoneNumbers ?? 1} number${access?.trial?.maxPhoneNumbers === 1 ? '' : 's'} — choose a plan to add more`
+      : access?.readOnly
+        ? 'Choose a plan to make changes'
+        : 'Choose a plan first';
   const connected =
     phoneNumbers.some((number) => number.status !== 'RELEASED') ||
     sip?.status === 'ACTIVE';
@@ -136,7 +152,9 @@ export const PhoneView: React.FC<PhoneViewProps> = ({
           {phoneSetup?.error ?? 'Something went wrong.'}{' '}
           {phoneSetup?.method === 'SIP'
             ? 'Try connecting your phone system again below.'
-            : 'Pick another number below — it is included in your plan.'}
+            : onTrial
+              ? 'Pick another number below — it is free during your trial.'
+              : 'Pick another number below — it is included in your plan.'}
         </Notice>
       )}
 
@@ -148,11 +166,13 @@ export const PhoneView: React.FC<PhoneViewProps> = ({
         >
           {live
             ? 'Your plan is active. Get a Ringgy number below (then forward your business line to it), or connect your existing phone system over SIP.'
-            : 'As soon as your plan is confirmed you can get a Ringgy number or connect your existing phone system here.'}
+            : onTrial
+              ? 'Your free trial has started. Get a Ringgy number below (then forward your business line to it), or connect your existing phone system over SIP.'
+              : 'As soon as your plan is confirmed you can get a Ringgy number or connect your existing phone system here.'}
         </Notice>
       )}
 
-      {!live && (
+      {!live && !onTrial && !access?.readOnly && (
         <Notice
           tone="amber"
           title="Choose a plan first"
@@ -170,14 +190,16 @@ export const PhoneView: React.FC<PhoneViewProps> = ({
       <div className="grid items-start gap-[18px] xl:grid-cols-2">
         <NumbersCard
           billing={billing}
-          live={live}
+          live={canBuy}
+          blockedReason={buyBlockedReason}
+          onTrial={onTrial}
           phoneNumbers={phoneNumbers}
           onBuyNumber={onBuyNumber}
           onReleaseNumber={onReleaseNumber}
         />
         <SipCard
           sip={sip}
-          live={live}
+          live={canSip}
           defaultNumber={toE164(tenant.phoneNumber) ?? ''}
           onConnectSip={onConnectSip}
           onDisconnectSip={onDisconnectSip}
@@ -196,10 +218,21 @@ export const PhoneView: React.FC<PhoneViewProps> = ({
 const NumbersCard: React.FC<{
   billing: ApiBilling | null;
   live: boolean;
+  /** Why a number cannot be bought now, when it cannot. */
+  blockedReason: string | null;
+  onTrial: boolean;
   phoneNumbers: ApiPhoneNumber[];
   onBuyNumber: (phoneNumber: string, country?: string) => Promise<void>;
   onReleaseNumber: (id: string) => Promise<void>;
-}> = ({ billing, live, phoneNumbers, onBuyNumber, onReleaseNumber }) => {
+}> = ({
+  billing,
+  live,
+  blockedReason,
+  onTrial,
+  phoneNumbers,
+  onBuyNumber,
+  onReleaseNumber,
+}) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [buying, setBuying] = useState<{ result: ApiAvailableNumber; country: string } | null>(null);
   const [releasing, setReleasing] = useState<ApiPhoneNumber | null>(null);
@@ -218,7 +251,7 @@ const NumbersCard: React.FC<{
           <SecondaryButton
             type="button"
             disabled={!live}
-            title={live ? undefined : 'Choose a plan first'}
+            title={blockedReason ?? undefined}
             onClick={() => setIsSearchOpen((open) => !open)}
           >
             {isSearchOpen ? 'Close search' : 'Get a new number'}
@@ -285,7 +318,9 @@ const NumbersCard: React.FC<{
             search={api.searchNumbers}
             actionLabel="Buy"
             priceLabel={(result) =>
-              nextIsIncluded
+              onTrial
+                ? 'Free during your trial'
+                : nextIsIncluded
                 ? 'Included in your plan'
                 : result.monthlyPriceCents !== null
                   ? `${formatCents(result.monthlyPriceCents)}/mo`
@@ -294,9 +329,7 @@ const NumbersCard: React.FC<{
             blockedReason={(result) =>
               result.masked
                 ? 'Number purchasing is pending carrier account verification'
-                : live
-                  ? null
-                  : 'Choose a plan first'
+                : blockedReason
             }
             onPick={(result, country) => setBuying({ result, country })}
           />

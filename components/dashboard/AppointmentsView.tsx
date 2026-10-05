@@ -19,6 +19,8 @@ interface AppointmentsViewProps {
   appointments: Appointment[];
   onOpenModal: (data?: Partial<Appointment>) => void;
   onCancelAppointment: (id: string) => void;
+  /** Jobs can be opened to view, but nothing can be added or changed. */
+  readOnly?: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -44,6 +46,7 @@ export const AppointmentsView: React.FC<AppointmentsViewProps> = ({
   appointments,
   onOpenModal,
   onCancelAppointment,
+  readOnly = false,
 }) => {
   const [weekOffset, setWeekOffset] = useState(0);
 
@@ -107,10 +110,12 @@ export const AppointmentsView: React.FC<AppointmentsViewProps> = ({
             This week
           </SecondaryButton>
         )}
-        <PrimaryButton className="ml-auto" onClick={() => onOpenModal()}>
-          <Plus className="h-4 w-4" />
-          New job
-        </PrimaryButton>
+        {!readOnly && (
+          <PrimaryButton className="ml-auto" onClick={() => onOpenModal()}>
+            <Plus className="h-4 w-4" />
+            New job
+          </PrimaryButton>
+        )}
       </div>
 
       <Card className="overflow-hidden">
@@ -195,7 +200,11 @@ export const AppointmentsView: React.FC<AppointmentsViewProps> = ({
           <span className="block h-[9px] w-[9px] rounded-[3px] bg-[#0E8A5F]" />
           Booked by your team
         </div>
-        <span className="text-[#8A93A6]">Select a job to edit or cancel it.</span>
+        <span className="text-[#8A93A6]">
+          {readOnly
+            ? 'Select a job to see its details.'
+            : 'Select a job to edit or cancel it.'}
+        </span>
       </div>
 
       {undated.length > 0 && (
@@ -218,12 +227,20 @@ export const AppointmentsView: React.FC<AppointmentsViewProps> = ({
                   {job.service} · {job.customerPhone}
                 </div>
               </div>
-              <SecondaryButton onClick={() => onOpenModal(job)}>
-                Set a time
-              </SecondaryButton>
-              <SecondaryButton onClick={() => onCancelAppointment(job.id)}>
-                Cancel
-              </SecondaryButton>
+              {readOnly ? (
+                <SecondaryButton onClick={() => onOpenModal(job)}>
+                  View
+                </SecondaryButton>
+              ) : (
+                <>
+                  <SecondaryButton onClick={() => onOpenModal(job)}>
+                    Set a time
+                  </SecondaryButton>
+                  <SecondaryButton onClick={() => onCancelAppointment(job.id)}>
+                    Cancel
+                  </SecondaryButton>
+                </>
+              )}
             </div>
           ))}
         </Card>

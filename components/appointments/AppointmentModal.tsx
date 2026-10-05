@@ -25,6 +25,8 @@ interface AppointmentModalProps {
   onClose: () => void;
   onSave: (appointment: Partial<Appointment>) => void;
   initialData?: Partial<Appointment> | null;
+  /** View only: the dashboard is read-only after the free trial. */
+  readOnly?: boolean;
 }
 
 export const AppointmentModal: React.FC<AppointmentModalProps> = ({
@@ -32,6 +34,7 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
   onClose,
   onSave,
   initialData,
+  readOnly = false,
 }) => {
   const [formData, setFormData] = useState<Partial<Appointment>>({
     customerName: '',
@@ -83,6 +86,7 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <fieldset disabled={readOnly} className="contents">
           
           {/* Customer name */}
           <div>
@@ -199,6 +203,8 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
             />
           </div>
 
+          </fieldset>
+
           {/* Modal Actions */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#E4E8F0]">
             <button
@@ -206,14 +212,16 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
               onClick={onClose}
               className="px-4 py-2 rounded-xl bg-[#F2F4F8] text-[#26304A] text-xs font-semibold hover:bg-slate-200 transition-colors"
             >
-              Cancel
+              {readOnly ? 'Close' : 'Cancel'}
             </button>
-            <button
-              type="submit"
-              className="px-5 py-2 rounded-xl bg-[#2F6BFF] hover:bg-[#1E4FD8] text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
-            >
-              Save appointment
-            </button>
+            {!readOnly && (
+              <button
+                type="submit"
+                className="px-5 py-2 rounded-xl bg-[#2F6BFF] hover:bg-[#1E4FD8] text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
+              >
+                Save appointment
+              </button>
+            )}
           </div>
         </form>
 

@@ -28,6 +28,8 @@ interface CallsViewProps {
   onSelectCall: (call: Call) => void;
   onCreateAppointmentFromCall: (call: Call) => void;
   onMarkResolved: (callId: string) => void;
+  /** Hides the actions that change anything (read-only after the trial). */
+  readOnly?: boolean;
 }
 
 export const CallsView: React.FC<CallsViewProps> = ({
@@ -36,6 +38,7 @@ export const CallsView: React.FC<CallsViewProps> = ({
   onSelectCall,
   onCreateAppointmentFromCall,
   onMarkResolved,
+  readOnly = false,
 }) => {
   const [filter, setFilter] = useState<CallFilter>('All');
 
@@ -215,6 +218,7 @@ export const CallsView: React.FC<CallsViewProps> = ({
                 <PhoneOutgoing className="h-4 w-4" />
                 Call back
               </a>
+              {!readOnly && (
               <button
                 type="button"
                 onClick={() => onCreateAppointmentFromCall(active)}
@@ -223,7 +227,8 @@ export const CallsView: React.FC<CallsViewProps> = ({
                 <CalendarPlus className="h-4 w-4" />
                 Book job
               </button>
-              {active.outcome === 'needs_review' && !active.isResolved && (
+              )}
+              {!readOnly && active.outcome === 'needs_review' && !active.isResolved && (
                 <button
                   type="button"
                   onClick={() => onMarkResolved(active.id)}

@@ -197,8 +197,27 @@ export interface ApiPlan {
 }
 
 /** GET /billing/plans — public, so the signup wizard can show it. */
+/** The free trial new signups get, as the backoffice has set it. */
+export interface ApiTrialTerms {
+  enabled: boolean;
+  durationDays: number;
+  includedMinutes: number;
+  maxPhoneNumbers: number;
+  /** Whether answering stops once the trial minutes are used. */
+  stopAtMinuteLimit: boolean;
+  /** Days after the trial during which calls are still answered. */
+  graceDays: number;
+  /** Days after that during which the dashboard stays viewable. */
+  readOnlyDays: number;
+  releaseNumbers: boolean;
+  /** Days after answering stops before trial numbers are released. */
+  numberRetentionDays: number;
+}
+
 export interface ApiPlanCatalogue {
   plans: ApiPlan[];
+  /** Missing from servers that predate the free trial. */
+  trial?: ApiTrialTerms;
   pricePerMinuteCents: number | null;
   phoneNumberMonthlyCents: number | null;
   billingEnabled: boolean;
@@ -356,4 +375,52 @@ export interface ApiSip {
   codecs: string[];
   notes: string[];
   lastSyncedAt: string | null;
+}
+
+export type ApiAccessMode =
+  | 'paid'
+  | 'trial'
+  | 'grace'
+  | 'suspended'
+  | 'expired'
+  | 'lapsed'
+  | 'none';
+
+export interface ApiTrial {
+  status: 'ACTIVE' | 'GRACE' | 'SUSPENDED' | 'EXPIRED' | 'CONVERTED';
+  startedAt: string;
+  endsAt: string;
+  /** Live answering stops here if no plan has been chosen. */
+  graceEndsAt: string;
+  /** The read-only dashboard closes here. */
+  readOnlyEndsAt: string;
+  /** Null when trial numbers are kept. */
+  numberReleaseAt: string | null;
+  numbersReleasedAt: string | null;
+  convertedAt: string | null;
+  daysLeft: number;
+  endingSoon: boolean;
+  includedMinutes: number;
+  usedMinutes: number;
+  remainingMinutes: number;
+  minutesExhausted: boolean;
+  stopAtMinuteLimit: boolean;
+  maxPhoneNumbers: number;
+}
+
+/** What the account can do right now (GET /me/access). */
+export interface ApiAccess {
+  mode: ApiAccessMode;
+  canAnswerCalls: boolean;
+  answeringStoppedReason: string | null;
+  /** Changes are refused; everything can still be viewed. */
+  readOnly: boolean;
+  /** Only choosing a plan is offered. */
+  locked: boolean;
+  canBuyNumbers: boolean;
+  trialNumbersRemaining: number | null;
+  subscriptionStatus: ApiSubscriptionStatus | null;
+  trial: ApiTrial | null;
+  /** Trial numbers that will be released if no plan is chosen. */
+  numbersAtRisk: string[];
 }

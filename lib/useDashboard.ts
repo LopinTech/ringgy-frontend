@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import type {
+  ApiAccess,
   ApiAddOns,
   ApiBilling,
   ApiInvoice,
@@ -36,6 +37,8 @@ interface DashboardState {
   sip: ApiSip | null;
   /** The phone choice made at signup and whether it has been carried out. */
   phoneSetup: ApiPhoneSetup | null;
+  /** Trial / plan state; null when it could not be read (treated as unrestricted). */
+  access: ApiAccess | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -52,6 +55,7 @@ const EMPTY: DashboardState = {
   phoneNumbers: [],
   sip: null,
   phoneSetup: null,
+  access: null,
   isLoading: true,
   error: null,
 };
@@ -85,6 +89,7 @@ export function useDashboard(enabled: boolean) {
         phoneNumbers,
         sip,
         phoneSetup,
+        access,
       ] = await Promise.all([
         api.profile(),
         api.calls(),
@@ -97,6 +102,7 @@ export function useDashboard(enabled: boolean) {
         api.phoneNumbers().catch(() => []),
         api.sip().catch(() => null),
         api.getPhoneSetup().catch(() => null),
+        api.access().catch(() => null),
       ]);
 
       setState({
@@ -111,6 +117,7 @@ export function useDashboard(enabled: boolean) {
         phoneNumbers,
         sip,
         phoneSetup,
+        access,
         isLoading: false,
         error: null,
       });

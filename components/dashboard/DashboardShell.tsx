@@ -106,7 +106,10 @@ interface DashboardShellProps {
   needsReviewCount: number;
   isAdminView: boolean;
   onToggleAdminView: (isAdmin: boolean) => void;
-  onStartTestCall: () => void;
+  /** Left out when live answering is off, which hides the test call. */
+  onStartTestCall?: () => void;
+  /** Live answering is off because the free trial (or the plan) ended. */
+  answeringStopped?: boolean;
   onLogout: () => void;
   error?: string | null;
   children: React.ReactNode;
@@ -121,6 +124,7 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
   isAdminView,
   onToggleAdminView,
   onStartTestCall,
+  answeringStopped = false,
   onLogout,
   error,
   children,
@@ -203,23 +207,31 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
         <div className="mb-2 flex items-center gap-2">
           <span
             className={`block h-[7px] w-[7px] rounded-full ${
-              status === 'active' ? 'bg-[#3DD598]' : 'bg-[#F0A93B]'
+              answeringStopped
+                ? 'bg-[#F0625A]'
+                : status === 'active'
+                  ? 'bg-[#3DD598]'
+                  : 'bg-[#F0A93B]'
             }`}
           />
           <span className="text-[12.5px] font-bold text-white">
-            {status === 'active'
-              ? 'Receptionist live'
-              : status === 'paused'
-                ? 'Receptionist paused'
-                : 'Setup incomplete'}
+            {answeringStopped
+              ? 'Live answering stopped'
+              : status === 'active'
+                ? 'Receptionist live'
+                : status === 'paused'
+                  ? 'Receptionist paused'
+                  : 'Setup incomplete'}
           </span>
         </div>
         <div className="text-xs leading-[1.5] text-[#8A94AC]">
-          {status === 'active'
-            ? `Answering ${tenant.phoneNumber || 'your line'} around the clock.`
-            : status === 'paused'
-              ? 'Calls are going to voicemail until you resume.'
-              : 'Finish forwarding so calls reach your receptionist.'}
+          {answeringStopped
+            ? 'Choose a plan to turn your receptionist back on.'
+            : status === 'active'
+              ? `Answering ${tenant.phoneNumber || 'your line'} around the clock.`
+              : status === 'paused'
+                ? 'Calls are going to voicemail until you resume.'
+                : 'Finish forwarding so calls reach your receptionist.'}
         </div>
       </div>
 
@@ -272,9 +284,11 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
             </div>
           </div>
 
-          <SecondaryButton onClick={onStartTestCall} className="hidden sm:inline-flex">
-            Test call
-          </SecondaryButton>
+          {onStartTestCall && (
+            <SecondaryButton onClick={onStartTestCall} className="hidden sm:inline-flex">
+              Test call
+            </SecondaryButton>
+          )}
 
           <div ref={menuRef} className="relative border-l border-[#E4E8F0] pl-4">
             <button

@@ -14,6 +14,7 @@ import React, { useState } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type {
+  ApiAccess,
   ApiAddOn,
   ApiAddOnPurchase,
   ApiAddOns,
@@ -41,9 +42,12 @@ import {
   SecondaryButton,
   Tag,
 } from './ui';
+import { TrialSummary } from './TrialBanner';
 
 interface BillingViewProps {
   billing: ApiBilling | null;
+  /** Trial state, for the "current plan" card while on the free trial. */
+  access?: ApiAccess | null;
   plans: ApiPlanCatalogue | null;
   invoices: ApiInvoice[];
   addOns: ApiAddOns | null;
@@ -80,6 +84,7 @@ const minutes = (value: number) => `${Math.round(value).toLocaleString()} min`;
 
 export const BillingView: React.FC<BillingViewProps> = ({
   billing,
+  access = null,
   plans,
   invoices,
   addOns,
@@ -288,6 +293,8 @@ export const BillingView: React.FC<BillingViewProps> = ({
                   />
                 </div>
               </>
+            ) : access?.trial && access.trial.status !== 'CONVERTED' ? (
+              <TrialSummary trial={access.trial} access={access} />
             ) : (
               <>
                 <div className="text-xs font-bold tracking-[.08em] text-[#8A93A6] uppercase">
