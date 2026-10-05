@@ -29,7 +29,6 @@ import { BillingView } from '@/components/dashboard/BillingView';
 import { AccountView } from '@/components/dashboard/AccountView';
 import { AppointmentModal } from '@/components/appointments/AppointmentModal';
 import { TestCallModal } from '@/components/assistant/TestCallModal';
-import { AdminDashboard } from '@/components/admin/AdminDashboard';
 
 /**
  * What the dashboard was opened with. Stripe sends the browser back here
@@ -281,7 +280,6 @@ export default function DashboardPage() {
         });
       });
   }, [session, entry, confirmCheckout, completePhoneSetup]);
-  const [isAdminView, setIsAdminView] = useState(false);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<
@@ -351,16 +349,8 @@ export default function DashboardPage() {
       tenant={tenant}
       status={status}
       activeTab={activeTab}
-      onSelectTab={(tab) => {
-        setActiveTab(tab);
-        if (tab !== 'admin') setIsAdminView(false);
-      }}
+      onSelectTab={setActiveTab}
       needsReviewCount={needsReviewCount}
-      isAdminView={isAdminView}
-      onToggleAdminView={(admin) => {
-        setIsAdminView(admin);
-        setActiveTab(admin ? 'admin' : 'overview');
-      }}
       onStartTestCall={
         answeringStopped ? undefined : () => setIsTestCallOpen(true)
       }
@@ -382,21 +372,12 @@ export default function DashboardPage() {
         </Notice>
       )}
 
-      {activeTab !== 'admin' && (
-        <ServiceAccessBanner
-          access={access}
-          onUpgrade={() => setActiveTab('billing')}
-        />
-      )}
+      <ServiceAccessBanner
+        access={access}
+        onUpgrade={() => setActiveTab('billing')}
+      />
 
-      {activeTab === 'admin' ? (
-        <AdminDashboard
-          onSelectTenantToInspect={() => {
-            setIsAdminView(false);
-            setActiveTab('overview');
-          }}
-        />
-      ) : locked && access && activeTab !== 'billing' ? (
+      {locked && access && activeTab !== 'billing' ? (
         <LockedScreen access={access} onUpgrade={() => setActiveTab('billing')} />
       ) : (
         <>

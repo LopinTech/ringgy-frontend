@@ -21,7 +21,6 @@ import {
   Menu,
   PhoneCall,
   PhoneForwarded,
-  Shield,
   UserRound,
   X,
 } from 'lucide-react';
@@ -90,13 +89,6 @@ export const PAGES: PageMeta[] = [
   },
 ];
 
-const ADMIN_PAGE: PageMeta = {
-  id: 'admin',
-  label: 'Admin console',
-  title: 'Admin console',
-  sub: 'Every tenant on the platform.',
-  icon: Shield,
-};
 
 interface DashboardShellProps {
   tenant: TenantConfig;
@@ -104,8 +96,6 @@ interface DashboardShellProps {
   activeTab: string;
   onSelectTab: (tab: string) => void;
   needsReviewCount: number;
-  isAdminView: boolean;
-  onToggleAdminView: (isAdmin: boolean) => void;
   /** Left out when live answering is off, which hides the test call. */
   onStartTestCall?: () => void;
   /** Live answering is off because the free trial (or the plan) ended. */
@@ -121,8 +111,6 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
   activeTab,
   onSelectTab,
   needsReviewCount,
-  isAdminView,
-  onToggleAdminView,
   onStartTestCall,
   answeringStopped = false,
   onLogout,
@@ -153,8 +141,7 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
     };
   }, [isMenuOpen]);
 
-  const pages = isAdminView ? [ADMIN_PAGE, ...PAGES] : PAGES;
-  const meta = pages.find((page) => page.id === activeTab) ?? PAGES[0];
+  const meta = PAGES.find((page) => page.id === activeTab) ?? PAGES[0];
 
   const select = (id: string) => {
     onSelectTab(id);
@@ -176,7 +163,7 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
       </div>
 
       <nav className="flex flex-1 flex-col gap-[3px]">
-        {pages.map((page) => {
+        {PAGES.map((page) => {
           const isActive = page.id === activeTab;
           const badge = page.id === 'calls' ? needsReviewCount : 0;
           const Icon = page.icon;
@@ -234,17 +221,6 @@ export const DashboardShell: React.FC<DashboardShellProps> = ({
                 : 'Finish forwarding so calls reach your receptionist.'}
         </div>
       </div>
-
-      {/* The admin console is staff-only and deliberately not part of the
-          seven customer destinations above. */}
-      <button
-        type="button"
-        onClick={() => onToggleAdminView(!isAdminView)}
-        className="flex items-center gap-2 rounded-[10px] px-3 py-2 text-left text-[12.5px] font-semibold text-[#6D778F] transition hover:text-white"
-      >
-        <Shield className="h-4 w-4" />
-        {isAdminView ? 'Back to my dashboard' : 'Admin console'}
-      </button>
     </div>
   );
 

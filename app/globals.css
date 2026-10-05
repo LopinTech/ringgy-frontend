@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+/* Tailwind 4 gives buttons the default arrow cursor. Everything clickable
+   shows the pointer instead, and disabled controls say so. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  label:has(> input[type="checkbox"]:not(:disabled)),
+  label:has(> input[type="radio"]:not(:disabled)) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 /* The product is light-only: the dashboard and signup share one palette,
    and a dark variant of it was never designed. */
 :root {
