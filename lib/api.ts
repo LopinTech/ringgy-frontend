@@ -83,7 +83,10 @@ async function readError(response: Response): Promise<string> {
 
 export interface RegisterPayload {
   email: string;
-  password: string;
+  /** Left out when the account is created with Google. */
+  password?: string;
+  /** From `api.googleSignIn` for a Google account with no Ringgy account. */
+  googleSignupToken?: string;
   businessName: string;
   ownerName?: string;
   trade?: string;
@@ -105,6 +108,14 @@ export interface RegisterPayload {
   };
 }
 
+export interface GoogleSignup {
+  signupToken: string;
+  email: string;
+  name: string | null;
+}
+
+export type GoogleSignInResult = { ok: true } | ({ ok: false } & GoogleSignup);
+
 /** A number search as query parameters, empty filters left out. */
 function searchParams(search: ApiNumberSearch): string {
   const params = new URLSearchParams();
@@ -125,6 +136,16 @@ export const api = {
     request<{ ok: true }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+    }),
+
+  /**
+   * Signs in with a Google ID token. `ok: false` means the Google account has
+   * no Ringgy account yet: finish the signup wizard with the signup token.
+   */
+  googleSignIn: (credential: string) =>
+    request<GoogleSignInResult>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ credential }),
     }),
 
   logout: () => request<{ ok: true }>('/auth/logout', { method: 'POST' }),

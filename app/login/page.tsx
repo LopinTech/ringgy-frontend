@@ -11,6 +11,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
+import {
+  GoogleSignInButton,
+  googleSignInEnabled,
+  stashGoogleSignup,
+} from '@/components/auth/GoogleSignInButton';
 import { Logo } from '@/components/brand/Logo';
 import { Loader2, AlertTriangle } from 'lucide-react';
 
@@ -48,6 +53,32 @@ export default function LoginPage() {
     }
   };
 
+  const handleGoogle = async (credential: string) => {
+    setError(null);
+    setIsSubmitting(true);
+
+    try {
+      const result = await api.googleSignIn(credential);
+      if (result.ok) {
+        await refresh();
+        router.push('/');
+        return;
+      }
+      // No account for this Google address yet: the signup wizard collects
+      // the business profile and creates it signed in with Google.
+      const { signupToken, email: googleEmail, name } = result;
+      stashGoogleSignup({ signupToken, email: googleEmail, name });
+      router.push('/signup');
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Something went wrong',
+      );
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FCFCFD] flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white rounded-[18px] border border-[#E4E8F0] shadow-sm p-6 space-y-5">
@@ -66,6 +97,20 @@ export default function LoginPage() {
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
+        )}
+
+        {googleSignInEnabled && (
+          <>
+            <GoogleSignInButton
+              text="signin_with"
+              onCredential={(credential) => void handleGoogle(credential)}
+            />
+            <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-[#8A93A6]">
+              <span className="h-px flex-1 bg-[#E4E8F0]" />
+              or
+              <span className="h-px flex-1 bg-[#E4E8F0]" />
+            </div>
+          </>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
