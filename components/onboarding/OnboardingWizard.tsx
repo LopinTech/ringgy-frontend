@@ -29,7 +29,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, type GoogleSignup } from '@/lib/api';
 import {
   formatCents,
   formatE164,
@@ -52,6 +52,11 @@ import type {
   ApiVoiceCatalogue,
 } from '@/lib/api-types';
 import { useAuth } from '@/components/auth/AuthProvider';
+import {
+  GoogleSignInButton,
+  googleSignInEnabled,
+  takeGoogleSignup,
+} from '@/components/auth/GoogleSignInButton';
 import { Logo } from '@/components/brand/Logo';
 
 /**
@@ -285,6 +290,9 @@ export const OnboardingWizard: React.FC = () => {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Set once the visitor continues with Google: the account is then created
+  // with that Google address and no password.
+  const [googleSignup, setGoogleSignup] = useState<GoogleSignup | null>(null);
   const [business, setBusiness] = useState('');
   const [person, setPerson] = useState('');
   const [trade, setTrade] = useState<string>(TRADE_CHIPS[0]);
@@ -377,6 +385,46 @@ export const OnboardingWizard: React.FC = () => {
       active = false;
     };
   }, []);
+
+  // Arriving from "Continue with Google" on the sign-in page with no account
+  // yet: pick that Google signup up instead of asking for a password.
+  useEffect(() => {
+    let active = true;
+
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      const pending = takeGoogleSignup();
+      if (!pending) return;
+      setGoogleSignup(pending);
+      setPerson((current) => current || pending.name || '');
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const continueWithGoogle = async (credential: string) => {
+    setError(null);
+    try {
+      const result = await api.googleSignIn(credential);
+      if (result.ok) {
+        // This Google account already has a Ringgy account: just sign in.
+        await refresh();
+        router.push('/');
+        return;
+      }
+      const { signupToken, email: googleEmail, name } = result;
+      setGoogleSignup({ signupToken, email: googleEmail, name });
+      setPerson((current) => current || name || '');
+    } catch (googleError) {
+      setError(
+        googleError instanceof Error
+          ? googleError.message
+          : 'Google sign-in failed — please try again',
+      );
+    }
+  };
 
   // Plans are public and small, so they are fetched up front like the
   // voices. A failure only means signup skips Checkout, never that it stops.
@@ -582,6 +630,7 @@ export const OnboardingWizard: React.FC = () => {
   // Plain function: the React Compiler memoizes it.
   const stepError = ((): string | null => {
     if (stepId === 'account') {
+      if (googleSignup) return null;
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
         return 'Enter the email address you want to sign in with';
       }
@@ -637,8 +686,9 @@ export const OnboardingWizard: React.FC = () => {
     setError(null);
     try {
       await api.register({
-        email: email.trim(),
-        password,
+        email: googleSignup?.email ?? email.trim(),
+        password: googleSignup ? undefined : password,
+        googleSignupToken: googleSignup?.signupToken,
         businessName: business.trim(),
         ownerName: person.trim() || undefined,
         trade: trade === OTHER ? tradeOther.trim() : trade,
@@ -843,8 +893,41 @@ export const OnboardingWizard: React.FC = () => {
                 : meta.sub}
             </p>
 
-            {stepId === 'account' && (
+            {stepId === 'account' && googleSignup && (
+              <div className={`${CARD} flex flex-col gap-2 bg-[#FCFCFD] p-4`}>
+                <span className="text-[13px] font-semibold text-[#26304A]">
+                  Signing up with Google
+                </span>
+                <span className="text-[15px] text-[#0E1526]">
+                  {googleSignup.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setGoogleSignup(null)}
+                  className="self-start text-[13px] font-semibold text-[#2F6BFF] hover:underline"
+                >
+                  Use an email and password instead
+                </button>
+              </div>
+            )}
+
+            {stepId === 'account' && !googleSignup && (
               <div className="flex flex-col gap-[18px]">
+                {googleSignInEnabled && (
+                  <>
+                    <GoogleSignInButton
+                      text="signup_with"
+                      onCredential={(credential) =>
+                        void continueWithGoogle(credential)
+                      }
+                    />
+                    <div className="flex items-center gap-3 text-[12px] font-semibold uppercase tracking-wide text-[#8A93A6]">
+                      <span className="h-px flex-1 bg-[#E4E8F0]" />
+                      or
+                      <span className="h-px flex-1 bg-[#E4E8F0]" />
+                    </div>
+                  </>
+                )}
                 <label className="flex flex-col gap-[7px]">
                   <span className={LABEL}>Email</span>
                   <input

@@ -135,8 +135,53 @@ export interface ApiAppointment {
   priceEstimate: string | null;
   callControlId: string | null;
   status: ApiAppointmentStatus;
+  /** Set once the appointment is mirrored in Google Calendar. */
+  googleEventId: string | null;
+  /** Why the last Google Calendar sync failed, if it did. */
+  googleSyncError: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Where appointments the assistant books are saved. */
+export type ApiAppointmentDestination = 'DASHBOARD' | 'GOOGLE_CALENDAR' | 'BOTH';
+
+export interface ApiGoogleCalendarStatus {
+  /** False until the server has Google Calendar credentials configured. */
+  available: boolean;
+  destination: ApiAppointmentDestination;
+  connection: {
+    googleEmail: string;
+    calendarId: string | null;
+    calendarName: string | null;
+    status: 'CONNECTED' | 'NEEDS_RECONNECT';
+    lastError: string | null;
+  } | null;
+}
+
+/** When the assistant may transfer callers to a person. */
+export type ApiHandoverWindow = 'BUSINESS_HOURS' | 'AFTER_HOURS' | 'ALWAYS';
+
+export interface ApiHandover {
+  enabled: boolean;
+  /** E.164. */
+  primaryNumber: string | null;
+  backupNumber: string | null;
+  /** Transfer when the caller asks for a person. */
+  onRequest: boolean;
+  /** Transfer when the assistant cannot handle the call. */
+  whenUnsure: boolean;
+  window: ApiHandoverWindow;
+  /** IANA zone the business hours are in. */
+  timeZone: string | null;
+  /** Whether weekly hours are set in Company profile. */
+  hoursSet: boolean;
+}
+
+export interface ApiGoogleCalendar {
+  id: string;
+  name: string;
+  primary: boolean;
 }
 
 /** One line of a call transcript, as stored by the conversation sync. */

@@ -110,8 +110,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 className={FIELD}
               />
               <span className="text-xs text-[#8A93A6]">
-                Where the assistant hands a caller off, and where alerts are
-                texted.
+                Where alerts are texted. Calls are transferred to the handover
+                numbers under Settings.
               </span>
             </label>
 

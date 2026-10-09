@@ -5,7 +5,7 @@
  * right, and the active view between them. It replaces the old top-bar plus
  * horizontal-tabs layout entirely.
  *
- * The rail collapses into a slide-over below `lg`, because the seven
+ * The rail collapses into a slide-over below `lg`, because the eight
  * destinations do not fit a phone and this dashboard is opened from a truck
  * as often as from a desk.
  */
@@ -21,6 +21,7 @@ import {
   Menu,
   PhoneCall,
   PhoneForwarded,
+  Settings,
   UserRound,
   X,
 } from 'lucide-react';
@@ -79,6 +80,13 @@ export const PAGES: PageMeta[] = [
     title: 'Billing and usage',
     sub: 'Plan, minutes used, and invoices.',
     icon: CreditCard,
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    title: 'Settings',
+    sub: 'Call handover, integrations, and where bookings are saved.',
+    icon: Settings,
   },
   {
     id: 'account',

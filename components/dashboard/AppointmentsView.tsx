@@ -11,7 +11,13 @@
  */
 
 import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import {
+  CalendarCheck,
+  CalendarX,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+} from 'lucide-react';
 import type { Appointment } from '@/types/schema';
 import { Card, SecondaryButton, PrimaryButton } from './ui';
 
@@ -178,8 +184,21 @@ export const AppointmentsView: React.FC<AppointmentsViewProps> = ({
                         })
                       : '—'}
                   </div>
-                  <div className="mt-[3px] truncate text-[12.5px] font-bold">
-                    {job.customerName}
+                  <div className="mt-[3px] flex items-center gap-1 text-[12.5px] font-bold">
+                    <span className="min-w-0 truncate">{job.customerName}</span>
+                    {job.googleCalendar === 'synced' && (
+                      <span title="In your Google Calendar" className="flex-none">
+                        <CalendarCheck className="h-3.5 w-3.5 text-[#6B7488]" />
+                      </span>
+                    )}
+                    {job.googleCalendar === 'failed' && (
+                      <span
+                        title="Could not be saved to Google Calendar"
+                        className="flex-none"
+                      >
+                        <CalendarX className="h-3.5 w-3.5 text-[#A2600B]" />
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 truncate text-[11.5px] text-[#6B7488]">
                     {job.service}
