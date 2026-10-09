@@ -75,8 +75,8 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
           Answering every call to {tenant.phoneNumber || 'your line'}
         </div>
         <p className="m-0 mt-0.5 text-[12.5px] text-[#6B7488]">
-          {tenant.businessHours || 'Around the clock'} · handing off to{' '}
-          {tenant.forwardingNumber || 'your line'} when a caller asks for you.
+          {tenant.businessHours || 'Around the clock'}. Transfers to a person
+          are set up under Settings.
         </p>
       </div>
       <SecondaryButton type="button" onClick={() => onStatusChange('paused')}>

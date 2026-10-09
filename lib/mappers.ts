@@ -190,6 +190,11 @@ export function toAppointment(appointment: ApiAppointment): Appointment {
     isAiCreated: appointment.callControlId !== null,
     callId: appointment.callControlId ?? undefined,
     priceEstimate: appointment.priceEstimate ?? undefined,
+    googleCalendar: appointment.googleSyncError
+      ? 'failed'
+      : appointment.googleEventId
+        ? 'synced'
+        : undefined,
   };
 }
 

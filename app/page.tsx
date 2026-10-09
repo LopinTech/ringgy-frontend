@@ -27,6 +27,8 @@ import { CompanyProfileView } from '@/components/dashboard/CompanyProfileView';
 import { PhoneView } from '@/components/dashboard/PhoneView';
 import { BillingView } from '@/components/dashboard/BillingView';
 import { AccountView } from '@/components/dashboard/AccountView';
+import { HandoverCard } from '@/components/dashboard/HandoverCard';
+import { SettingsView } from '@/components/dashboard/SettingsView';
 import { AppointmentModal } from '@/components/appointments/AppointmentModal';
 import { TestCallModal } from '@/components/assistant/TestCallModal';
 
@@ -481,6 +483,13 @@ export default function DashboardPage() {
               onPurchaseAddOn={purchaseAddOn}
               onCancelAddOn={cancelAddOn}
             />
+          )}
+
+          {activeTab === 'settings' && (
+            <fieldset disabled={readOnly} className="flex flex-col gap-[18px]">
+              <HandoverCard />
+              <SettingsView />
+            </fieldset>
           )}
 
           {activeTab === 'account' && (

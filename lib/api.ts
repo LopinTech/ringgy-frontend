@@ -3,6 +3,7 @@ import type {
   ApiAddOnPurchaseResult,
   ApiAddOns,
   ApiAppointment,
+  ApiAppointmentDestination,
   ApiAvailableNumber,
   ApiBilling,
   ApiInvoice,
@@ -13,6 +14,9 @@ import type {
   ApiSip,
   ApiCall,
   ApiGeoResult,
+  ApiGoogleCalendar,
+  ApiGoogleCalendarStatus,
+  ApiHandover,
   ApiHours,
   ApiOverview,
   ApiProfile,
@@ -346,4 +350,42 @@ export const api = {
     }),
 
   disconnectSip: () => request<void>('/me/sip', { method: 'DELETE' }),
+
+  handover: () => request<ApiHandover>('/me/handover'),
+
+  updateHandover: (
+    changes: Partial<Omit<ApiHandover, 'hoursSet' | 'timeZone'>> & {
+      timeZone?: string;
+    },
+  ) =>
+    request<ApiHandover>('/me/handover', {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  googleCalendar: () =>
+    request<ApiGoogleCalendarStatus>('/me/integrations/google-calendar'),
+
+  /** The Google consent URL to send the browser to. */
+  connectGoogleCalendar: () =>
+    request<{ url: string }>('/me/integrations/google-calendar/connect', {
+      method: 'POST',
+    }),
+
+  googleCalendars: () =>
+    request<ApiGoogleCalendar[]>('/me/integrations/google-calendar/calendars'),
+
+  updateGoogleCalendar: (changes: {
+    destination?: ApiAppointmentDestination;
+    calendarId?: string;
+  }) =>
+    request<ApiGoogleCalendarStatus>('/me/integrations/google-calendar', {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+
+  disconnectGoogleCalendar: () =>
+    request<ApiGoogleCalendarStatus>('/me/integrations/google-calendar', {
+      method: 'DELETE',
+    }),
 };

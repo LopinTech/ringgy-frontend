@@ -64,6 +64,8 @@ export interface Appointment {
   isAiCreated: boolean;
   callId?: string;
   priceEstimate?: string;
+  /** Whether it is mirrored in Google Calendar, or the last sync failed. */
+  googleCalendar?: 'synced' | 'failed';
 }
 
 export type TenantStatus = 'active' | 'setup_incomplete' | 'paused';
