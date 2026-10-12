@@ -124,13 +124,13 @@ export const BillingView: React.FC<BillingViewProps> = ({
 
   const checkout = (plan: ApiPlan) =>
     goToStripe(`plan:${plan.id}`, async () => {
-      const { url } = await api.startCheckout(plan.id, '/?tab=billing&billing=success');
+      const { url } = await api.startCheckout(plan.id, '/dashboard/billing?billing=success');
       return url;
     });
 
   const openPortal = () =>
     goToStripe('portal', async () => {
-      const { url } = await api.billingPortal('/?tab=billing');
+      const { url } = await api.billingPortal('/dashboard/billing');
       return url;
     });
 

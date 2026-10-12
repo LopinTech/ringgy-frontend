@@ -11,91 +11,11 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Building2,
-  CalendarDays,
-  ChevronDown,
-  CreditCard,
-  Gauge,
-  LogOut,
-  Menu,
-  PhoneCall,
-  PhoneForwarded,
-  Settings,
-  UserRound,
-  X,
-} from 'lucide-react';
+import { ChevronDown, LogOut, Menu, UserRound, X } from 'lucide-react';
 import { Logo } from '@/components/brand/Logo';
 import { initialsOf, SecondaryButton } from './ui';
 import type { TenantConfig, TenantStatus } from '@/types/schema';
-
-export interface PageMeta {
-  id: string;
-  label: string;
-  title: string;
-  sub: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-/** Tab ids are unchanged, so every existing handler keeps working. */
-export const PAGES: PageMeta[] = [
-  {
-    id: 'overview',
-    label: 'Overview',
-    title: 'Overview',
-    sub: 'How your AI receptionist performed this week.',
-    icon: Gauge,
-  },
-  {
-    id: 'calls',
-    label: 'Calls',
-    title: 'Calls',
-    sub: 'Every call answered, with full transcripts.',
-    icon: PhoneCall,
-  },
-  {
-    id: 'appointments',
-    label: 'Appointments',
-    title: 'Appointments',
-    sub: 'Jobs booked by your AI and your team.',
-    icon: CalendarDays,
-  },
-  {
-    id: 'assistant',
-    label: 'Company profile',
-    title: 'Company profile',
-    sub: 'What your receptionist tells customers about you.',
-    icon: Building2,
-  },
-  {
-    id: 'phone',
-    label: 'Phone number',
-    title: 'Phone number',
-    sub: 'Your numbers, SIP connection, and call forwarding.',
-    icon: PhoneForwarded,
-  },
-  {
-    id: 'billing',
-    label: 'Billing and usage',
-    title: 'Billing and usage',
-    sub: 'Plan, minutes used, and invoices.',
-    icon: CreditCard,
-  },
-  {
-    id: 'settings',
-    label: 'Settings',
-    title: 'Settings',
-    sub: 'Call handover, integrations, and where bookings are saved.',
-    icon: Settings,
-  },
-  {
-    id: 'account',
-    label: 'Account',
-    title: 'Account',
-    sub: 'Your login, notifications, and team.',
-    icon: UserRound,
-  },
-];
+import { PAGES } from './pages';
 
 
 interface DashboardShellProps {

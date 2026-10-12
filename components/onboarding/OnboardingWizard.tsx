@@ -58,6 +58,7 @@ import {
   takeGoogleSignup,
 } from '@/components/auth/GoogleSignInButton';
 import { Logo } from '@/components/brand/Logo';
+import { STEPS } from './steps';
 
 /**
  * The same MapLibre map the Company Profile picker draws. It reaches for
@@ -78,59 +79,6 @@ const ServiceAreaMap = dynamic(
 /* ------------------------------------------------------------------ *
  * Static content
  * ------------------------------------------------------------------ */
-
-const STEPS = [
-  {
-    id: 'account',
-    key: 'Account',
-    title: "Let's get your AI receptionist set up",
-    sub: 'Create your account to start answering calls, texts, and customer questions automatically.',
-  },
-  {
-    id: 'business',
-    key: 'Business',
-    title: 'Tell us about your business',
-    sub: 'This helps your AI receptionist understand who you are and what you do.',
-  },
-  {
-    id: 'phone',
-    key: 'Phone number',
-    title: 'How should calls reach your receptionist?',
-    sub: 'Pick a new number, forward the one you have, or connect your phone system. You can change this later.',
-  },
-  {
-    id: 'areas',
-    key: 'Service area',
-    title: 'Where do you take jobs?',
-    sub: 'Pick the areas you cover. Your AI receptionist will only book jobs inside them.',
-  },
-  {
-    id: 'services',
-    key: 'Services',
-    title: 'What services do you offer?',
-    sub: 'Tell your AI receptionist what you can help customers with.',
-  },
-  {
-    id: 'hours',
-    key: 'Hours',
-    title: 'When are you available?',
-    sub: 'Your AI receptionist can handle customers even when your team is unavailable.',
-  },
-  {
-    id: 'voice',
-    key: 'Voice',
-    title: 'How should your receptionist sound?',
-    sub: 'Pick the language and voice your customers will hear when they call.',
-  },
-  {
-    id: 'plan',
-    key: 'Plan',
-    title: 'Choose your plan',
-    sub: 'Every plan answers calls 24/7 and never cuts a caller off. Change or cancel any time.',
-  },
-  { id: 'ready', key: 'Ready', title: 'Your AI receptionist is ready', sub: '' },
-] as const;
-
 
 /**
  * The chip row is a shortcut, not the full taxonomy — "Other" reveals a
@@ -280,43 +228,91 @@ const FIELD =
 const LABEL = 'text-[13px] font-semibold text-[#26304A]';
 const CARD = 'rounded-[14px] border border-[#E4E8F0]';
 
-export const OnboardingWizard: React.FC = () => {
+/**
+ * What survives a refresh mid-signup, so a reload on any step keeps both the
+ * step itself (the URL) and what was typed — not just the former. The
+ * password is deliberately left out: it is not worth writing a plaintext
+ * credential to sessionStorage for the convenience of surviving a refresh.
+ */
+interface OnboardingDraft {
+  email: string;
+  business: string;
+  person: string;
+  trade: string;
+  tradeOther: string;
+  phone: string;
+  phoneMethod: PhoneMethod | null;
+  pickedNumber: { phoneNumber: string; country: string } | null;
+  services: ServiceRow[];
+  hours: HourRow[];
+  language: string;
+  gender: 'Female' | 'Male';
+  voiceId: string | null;
+  areas: ApiServiceArea[];
+  radiusMiles: number;
+  pickedPlanId: string | null;
+  googleSignup: GoogleSignup | null;
+}
+
+const DRAFT_KEY = 'ringgy.onboardingDraft';
+
+function readDraft(): OnboardingDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as OnboardingDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(): void {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(DRAFT_KEY);
+}
+
+export const OnboardingWizard: React.FC<{ stepId: string }> = ({ stepId }) => {
   const router = useRouter();
   const { refresh } = useAuth();
 
-  const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => readDraft()?.email ?? '');
   const [password, setPassword] = useState('');
   // Set once the visitor continues with Google: the account is then created
   // with that Google address and no password.
-  const [googleSignup, setGoogleSignup] = useState<GoogleSignup | null>(null);
-  const [business, setBusiness] = useState('');
-  const [person, setPerson] = useState('');
-  const [trade, setTrade] = useState<string>(TRADE_CHIPS[0]);
-  const [tradeOther, setTradeOther] = useState('');
-  const [phone, setPhone] = useState('');
-  const [phoneMethod, setPhoneMethod] = useState<PhoneMethod | null>(null);
+  const [googleSignup, setGoogleSignup] = useState<GoogleSignup | null>(
+    () => readDraft()?.googleSignup ?? null,
+  );
+  const [business, setBusiness] = useState(() => readDraft()?.business ?? '');
+  const [person, setPerson] = useState(() => readDraft()?.person ?? '');
+  const [trade, setTrade] = useState<string>(() => readDraft()?.trade ?? TRADE_CHIPS[0]);
+  const [tradeOther, setTradeOther] = useState(() => readDraft()?.tradeOther ?? '');
+  const [phone, setPhone] = useState(() => readDraft()?.phone ?? '');
+  const [phoneMethod, setPhoneMethod] = useState<PhoneMethod | null>(
+    () => readDraft()?.phoneMethod ?? null,
+  );
   // The Ringgy number picked on the phone step. Nothing is bought yet — it
   // is bought once the plan is paid for.
   const [pickedNumber, setPickedNumber] = useState<{
     phoneNumber: string;
     country: string;
-  } | null>(null);
+  } | null>(() => readDraft()?.pickedNumber ?? null);
   // Only a full US/Canada number yields an area code to search around.
   const forwardAreaCode = guessFromNumber(toE164(phone)).areaCode ?? (
     phone.replace(/\D/g, '').length >= 10 ? 'intl' : null
   );
-  const [services, setServices] = useState<ServiceRow[]>([
-    { name: '', price: '', duration: '' },
-  ]);
-  const [hours, setHours] = useState<HourRow[]>(INITIAL_HOURS);
+  const [services, setServices] = useState<ServiceRow[]>(
+    () => readDraft()?.services ?? [{ name: '', price: '', duration: '' }],
+  );
+  const [hours, setHours] = useState<HourRow[]>(() => readDraft()?.hours ?? INITIAL_HOURS);
 
-  const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
-  const [gender, setGender] = useState<'Female' | 'Male'>('Female');
-  const [voiceId, setVoiceId] = useState<string | null>(null);
+  const [language, setLanguage] = useState(() => readDraft()?.language ?? DEFAULT_LANGUAGE);
+  const [gender, setGender] = useState<'Female' | 'Male'>(
+    () => readDraft()?.gender ?? 'Female',
+  );
+  const [voiceId, setVoiceId] = useState<string | null>(() => readDraft()?.voiceId ?? null);
   const [catalogue, setCatalogue] = useState<ApiVoiceCatalogue | null>(null);
   const [catalogueError, setCatalogueError] = useState<string | null>(null);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
@@ -324,8 +320,10 @@ export const OnboardingWizard: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
 
-  const [areas, setAreas] = useState<ApiServiceArea[]>([]);
-  const [radiusMiles, setRadiusMiles] = useState(DEFAULT_RADIUS_MILES);
+  const [areas, setAreas] = useState<ApiServiceArea[]>(() => readDraft()?.areas ?? []);
+  const [radiusMiles, setRadiusMiles] = useState(
+    () => readDraft()?.radiusMiles ?? DEFAULT_RADIUS_MILES,
+  );
   const [areaQuery, setAreaQuery] = useState('');
   const [areaResults, setAreaResults] = useState<ApiGeoResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -334,7 +332,51 @@ export const OnboardingWizard: React.FC = () => {
 
   const [planCatalogue, setPlanCatalogue] = useState<ApiPlanCatalogue | null>(null);
   const [planLoadFailed, setPlanLoadFailed] = useState(false);
-  const [pickedPlanId, setPickedPlanId] = useState<string | null>(null);
+  const [pickedPlanId, setPickedPlanId] = useState<string | null>(
+    () => readDraft()?.pickedPlanId ?? null,
+  );
+
+  // Persists everything above so a refresh mid-signup does not start over.
+  useEffect(() => {
+    const draft: OnboardingDraft = {
+      email,
+      business,
+      person,
+      trade,
+      tradeOther,
+      phone,
+      phoneMethod,
+      pickedNumber,
+      services,
+      hours,
+      language,
+      gender,
+      voiceId,
+      areas,
+      radiusMiles,
+      pickedPlanId,
+      googleSignup,
+    };
+    window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  }, [
+    email,
+    business,
+    person,
+    trade,
+    tradeOther,
+    phone,
+    phoneMethod,
+    pickedNumber,
+    services,
+    hours,
+    language,
+    gender,
+    voiceId,
+    areas,
+    radiusMiles,
+    pickedPlanId,
+    googleSignup,
+  ]);
 
   // The free trial is the backoffice's to switch on or off. When it is on
   // there is no plan to pick at signup, so the plan step is left out and the
@@ -348,10 +390,11 @@ export const OnboardingWizard: React.FC = () => {
       ? STEPS.filter((entry) => entry.id !== 'plan')
       : STEPS;
   const lastStep = steps.length - 1;
-  // Clamped: the catalogue can arrive after the visitor is already past
-  // the step it removes.
-  const meta = steps[Math.min(step, lastStep)];
-  const stepId = meta.id;
+  // -1 when `stepId` (from the URL) is not in the current, filter-aware
+  // list — either a bogus step name, or one the catalogue has since removed
+  // (the "plan" step, once a trial or the catalogue's own state resolves).
+  const stepIndex = steps.findIndex((entry) => entry.id === stepId);
+  const meta = steps[stepIndex] ?? steps[0];
   const bizLabel = business.trim() || 'your business';
   const tradeLabel = (trade === OTHER ? tradeOther.trim() : trade) || 'service';
   const namedServices = services
@@ -417,6 +460,9 @@ export const OnboardingWizard: React.FC = () => {
       const { signupToken, email: googleEmail, name } = result;
       setGoogleSignup({ signupToken, email: googleEmail, name });
       setPerson((current) => current || name || '');
+      // Credentials are already collected via Google — move straight on
+      // instead of waiting for a manual "Next".
+      router.push('/signup/business');
     } catch (googleError) {
       setError(
         googleError instanceof Error
@@ -626,10 +672,15 @@ export const OnboardingWizard: React.FC = () => {
       rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)),
     );
 
-  /** What blocks the current step, or null when it is complete. */
+  /**
+   * What blocks a given step, or null when it is complete. Takes an id
+   * rather than closing over the current step so it can also be replayed
+   * against every earlier step, to work out how far the visitor has validly
+   * gotten (see `furthestAllowedIndex` below).
+   */
   // Plain function: the React Compiler memoizes it.
-  const stepError = ((): string | null => {
-    if (stepId === 'account') {
+  const errorForStep = (id: string): string | null => {
+    if (id === 'account') {
       if (googleSignup) return null;
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
         return 'Enter the email address you want to sign in with';
@@ -639,12 +690,12 @@ export const OnboardingWizard: React.FC = () => {
       }
       return null;
     }
-    if (stepId === 'business') {
+    if (id === 'business') {
       if (!business.trim()) return 'Tell us what your business is called';
       if (trade === OTHER && !tradeOther.trim()) return 'Name your trade';
       return null;
     }
-    if (stepId === 'phone') {
+    if (id === 'phone') {
       if (!phoneMethod) {
         return 'Choose how calls should reach your receptionist';
       }
@@ -662,24 +713,45 @@ export const OnboardingWizard: React.FC = () => {
       }
       return null;
     }
-    if (stepId === 'services') {
+    if (id === 'services') {
       if (namedServices.length === 0) {
         return 'Add at least one service you offer';
       }
       return null;
     }
-    if (stepId === 'hours') {
+    if (id === 'hours') {
       const backwards = hours.find((row) => row.open && row.to <= row.from);
       if (backwards) {
         return `${backwards.label} closing time must be after the opening time`;
       }
       return null;
     }
-    if (stepId === 'plan' && !planCatalogue && !planLoadFailed) {
+    if (id === 'plan' && !planCatalogue && !planLoadFailed) {
       return 'Plans are still loading — one moment';
     }
     return null;
+  };
+
+  const stepError = errorForStep(stepId);
+
+  // The furthest step the visitor may be on: the first one that is not yet
+  // complete, or the last step once everything before it is. Recomputed
+  // from the actual field values every time, rather than tracked
+  // separately, so it is correct even after a refresh or a direct link.
+  const furthestAllowedIndex = (() => {
+    const firstIncomplete = steps.findIndex((entry) => errorForStep(entry.id) !== null);
+    return firstIncomplete === -1 ? lastStep : firstIncomplete;
   })();
+
+  // A step id the catalogue has since filtered out, or one further ahead
+  // than the visitor has validly reached — by direct link, back/forward, or
+  // a refresh — sends them back to where they left off instead.
+  useEffect(() => {
+    if (stepIndex === -1 || stepIndex > furthestAllowedIndex) {
+      const target = steps[Math.min(furthestAllowedIndex, lastStep)]?.id ?? steps[0].id;
+      if (target !== stepId) router.replace(`/signup/${target}`);
+    }
+  }, [stepIndex, furthestAllowedIndex, stepId, steps, lastStep, router]);
 
   const submit = async () => {
     setIsSubmitting(true);
@@ -713,6 +785,7 @@ export const OnboardingWizard: React.FC = () => {
             }
           : undefined,
       });
+      clearDraft();
       await refresh();
     } catch (submitError) {
       setError(
@@ -731,35 +804,35 @@ export const OnboardingWizard: React.FC = () => {
     // On the free trial there is nothing to pay: the dashboard sets up the
     // number picked here and the trial runs from now.
     if (trial) {
-      // A full navigation, not router.push: the dashboard reads its entry
-      // params from window.location on first render, which a client-side
-      // transition has not updated yet.
-      redirectTo('/?trial=started&setup=number');
+      // A full navigation, not router.push: the dashboard layout reads its
+      // entry params from window.location on first render, which a
+      // client-side transition has not updated yet.
+      redirectTo('/dashboard/phone?trial=started&setup=number');
       return;
     }
     if (planLoadFailed) {
       // The trial (if the backoffice offers one) started with the account;
       // the dashboard reads the real state instead of guessing here.
-      redirectTo('/?setup=number');
+      redirectTo('/dashboard/phone?setup=number');
       return;
     }
     if (!billingEnabled || !chosenPlan) {
-      router.push('/?billing=unavailable');
+      router.push('/dashboard/billing?billing=unavailable');
       return;
     }
 
     try {
       const { url } = await api.startCheckout(
         chosenPlan.id,
-        '/?billing=success&setup=number',
-        '/?tab=billing&billing=cancelled',
+        '/dashboard/phone?billing=success&setup=number',
+        '/dashboard/billing?billing=cancelled',
       );
       redirectTo(url);
     } catch (checkoutError) {
       router.push(
         isBillingUnavailable(checkoutError)
-          ? '/?billing=unavailable'
-          : '/?tab=billing',
+          ? '/dashboard/billing?billing=unavailable'
+          : '/dashboard/billing',
       );
     }
   };
@@ -770,16 +843,17 @@ export const OnboardingWizard: React.FC = () => {
       return;
     }
     setError(null);
-    if (step >= lastStep) {
+    if (stepIndex >= lastStep) {
       void submit();
       return;
     }
-    setStep((current) => Math.min(lastStep, current + 1));
+    router.push(`/signup/${steps[stepIndex + 1].id}`);
   };
 
   const back = () => {
     setError(null);
-    setStep((current) => Math.max(0, current - 1));
+    if (stepIndex <= 0) return;
+    router.push(`/signup/${steps[stepIndex - 1].id}`);
   };
 
   const summary = [
@@ -869,17 +943,17 @@ export const OnboardingWizard: React.FC = () => {
             <div
               key={entry.key}
               className={`h-1 flex-1 rounded-full transition-colors ${
-                index <= step ? 'bg-[#2F6BFF]' : 'bg-[#E4E8F0]'
+                index <= stepIndex ? 'bg-[#2F6BFF]' : 'bg-[#E4E8F0]'
               }`}
             />
           ))}
         </div>
         <div className="mb-8 text-[12.5px] font-semibold text-[#8A93A6]">
-          Step {Math.min(step, lastStep) + 1} of {steps.length} · {meta.key}
+          Step {Math.max(0, stepIndex) + 1} of {steps.length} · {meta.key}
         </div>
 
         <div className="w-full max-w-[460px] flex-1">
-          <div key={step} className="animate-floatIn">
+          <div key={stepId} className="animate-floatIn">
             <h1 className="mb-2.5 text-[26px] font-extrabold leading-[1.15] tracking-[-0.03em] text-[#0E1526] xl:text-[33px]">
               {meta.title}
             </h1>
@@ -1772,7 +1846,7 @@ export const OnboardingWizard: React.FC = () => {
             </div>
           )}
           <div className="flex items-center gap-3">
-            {step > 0 && (
+            {stepIndex > 0 && (
               <button
                 type="button"
                 onClick={back}
